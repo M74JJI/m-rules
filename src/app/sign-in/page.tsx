@@ -44,20 +44,7 @@ export default async function SignInPage({ searchParams }: Props) {
         <div className="mb-5 flex justify-end">
           <ThemeSwitcher />
         </div>
-        <div className="auth-brand-row">
-          <div className="auth-mark" aria-hidden="true">
-            MR
-          </div>
-          <div className="min-w-0 flex-1">
-            <SectionHeader
-              eyebrow="Secure access"
-              title="Mercure Rules Hub"
-              titleAs="h1"
-              titleId="signin-title"
-            />
-          </div>
-        </div>
-
+        <div className="h-4"></div>
         {configured ? (
           <form action={login}>
             <AuthActionButton type="submit">
