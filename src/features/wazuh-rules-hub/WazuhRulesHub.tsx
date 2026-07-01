@@ -1409,7 +1409,7 @@ function UseCaseStudio({
   onDelete: (useCaseId: string) => Promise<void>;
 }) {
   const existingIds = useMemo(() => new Set(useCases.map((useCase) => useCase.id)), [useCases]);
-  const [component, setComponent] = useState<(typeof USE_CASE_COMPONENTS)[number]>('Fortigate');
+  const [component] = useState('Global');
   const [name, setName] = useState('');
   const [shortName, setShortName] = useState('');
   const [product, setProduct] = useState('');
@@ -1432,7 +1432,6 @@ function UseCaseStudio({
 
   const resetForm = () => {
     setEditingId(null);
-    setComponent('Fortigate');
     setName('');
     setShortName('');
     setProduct('');
@@ -1473,8 +1472,8 @@ function UseCaseStudio({
         <SurfaceCard className="p-4 space-y-4">
           <div><h2 className="text-lg font-bold text-[var(--text)]">Use Case Studio</h2><p className="text-sm text-[var(--text-soft)]">Register global use cases once, get stable IDs like <code>uc_here_name_of_use</code>, then reference those IDs inside XML with <code>&lt;info type="text"&gt;use_case:...&lt;/info&gt;</code>.</p></div>
           <div className="grid grid-cols-2 gap-3">
-            <div><FieldLabel>Component</FieldLabel><Select className="w-full" value={component} onChange={(e) => setComponent(e.target.value as (typeof USE_CASE_COMPONENTS)[number])}>{USE_CASE_COMPONENTS.map((item) => <option key={item} value={item}>{item}</option>)}</Select></div>
             <div><FieldLabel>Global ID</FieldLabel><Input className="w-full" value={suggestedId} readOnly /></div>
+            <div><FieldLabel>Scope</FieldLabel><Input className="w-full" value="Global" readOnly /></div>
             <div className="col-span-2"><FieldLabel>Full name</FieldLabel><Input className="w-full" value={name} onChange={(e) => setName(e.target.value)} placeholder="Azure impossible travel detection" /></div>
             <div><FieldLabel>Short name</FieldLabel><Input className="w-full" value={shortName} onChange={(e) => setShortName(e.target.value)} placeholder="Impossible Travel" /></div>
             <div><FieldLabel>Category</FieldLabel><Input className="w-full" value={category} onChange={(e) => setCategory(e.target.value)} placeholder="Identity & Access" /></div>
@@ -1512,7 +1511,6 @@ function UseCaseStudio({
                     <Button className="text-xs" onClick={() => { void copyToClipboard(useCase.id); }}>Copy ID</Button>
                     {useCase.source === 'custom' ? <Button className="text-xs" onClick={() => {
                       setEditingId(useCase.id);
-                      setComponent((USE_CASE_COMPONENTS.includes(useCase.component as (typeof USE_CASE_COMPONENTS)[number]) ? useCase.component : 'Fortigate') as (typeof USE_CASE_COMPONENTS)[number]);
                       setName(useCase.name);
                       setShortName(useCase.shortName);
                       setProduct(useCase.product);

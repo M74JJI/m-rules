@@ -430,7 +430,13 @@ button {
 .app-theme-unify textarea,
 .app-theme-unify select {
   border-color: var(--border) !important;
-  background: rgba(255, 255, 255, 0.03) !important;
+  background: color-mix(in oklch, var(--background) 92%, var(--panel) 8%) !important;
+  color: var(--text) !important;
+}
+
+.app-theme-unify option,
+.app-theme-unify optgroup {
+  background: var(--panel) !important;
   color: var(--text) !important;
 }
 
