@@ -1417,18 +1417,16 @@ function UseCaseStudio({
   const [category, setCategory] = useState('');
   const [description, setDescription] = useState('');
   const [query, setQuery] = useState('');
-  const [filterComponent, setFilterComponent] = useState('all');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   const suggestedId = useMemo(() => editingId || buildUseCaseId(component, name, existingIds), [component, editingId, name, existingIds]);
   const creator = currentUser?.name || currentUser?.email || currentUser?.id || 'Unknown user';
   const filtered = useMemo(() => useCases.filter((useCase) => {
-    if (filterComponent !== 'all' && useCase.component !== filterComponent) return false;
     if (!query.trim()) return true;
     const hay = `${useCase.id} ${useCase.name} ${useCase.shortName} ${useCase.component} ${useCase.category} ${useCase.createdBy}`.toLowerCase();
     return hay.includes(query.trim().toLowerCase());
-  }), [filterComponent, query, useCases]);
+  }), [query, useCases]);
 
   const resetForm = () => {
     setEditingId(null);
@@ -1491,13 +1489,7 @@ function UseCaseStudio({
             <div><h2 className="text-lg font-bold text-[var(--text)]">Catalog</h2><p className="text-sm text-[var(--text-soft)]">Search IDs, copy them into XML, and see who created each use case.</p></div>
             <Badge tone="muted">{filtered.length} shown</Badge>
           </div>
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(220px,1fr)_220px]">
-            <Input className="w-full" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search ID, name, component, creator..." />
-            <Select className="w-full" value={filterComponent} onChange={(e) => setFilterComponent(e.target.value)}>
-              <option value="all">All components</option>
-              {USE_CASE_COMPONENTS.map((item) => <option key={item} value={item}>{item}</option>)}
-            </Select>
-          </div>
+          <Input className="w-full" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search ID, name, creator..." />
           <div className="space-y-2 max-h-[560px] overflow-y-auto pr-1 custom-scrollbar">
             {filtered.map((useCase) => (
               <div key={useCase.id} className="rounded-lg border border-[var(--border)] bg-[var(--panel-2)] p-3 space-y-2">
@@ -1505,7 +1497,7 @@ function UseCaseStudio({
                   <div>
                     <div className="font-semibold text-[var(--text)]">{useCase.name}</div>
                     <div className="text-xs font-medium text-[var(--text)]">{useCase.id}</div>
-                    <div className="text-xs text-[var(--text-soft)]">{useCase.component} · {useCase.category}</div>
+                    <div className="text-xs text-[var(--text-soft)]">Global · {useCase.category}</div>
                   </div>
                   <div className="flex gap-2">
                     <Button className="text-xs" onClick={() => { void copyToClipboard(useCase.id); }}>Copy ID</Button>
@@ -1540,7 +1532,6 @@ function UseCaseStudio({
 // ---- Use Case Tree ----
 function UseCaseTree({ data, useCases, onSelect }: { data: ParsedCollection; useCases: UseCaseRecord[]; onSelect: (s: Selected) => void }) {
   const [query, setQuery] = useState('');
-  const [filterComponent, setFilterComponent] = useState('all');
   const [filterSource, setFilterSource] = useState('all');
   const grouped = useMemo(() => {
     const map = new Map<string, RuleRecord[]>();
@@ -1548,23 +1539,21 @@ function UseCaseTree({ data, useCases, onSelect }: { data: ParsedCollection; use
       const uc = getUseCaseById(useCases, r.useCaseId);
       const hay = `${r.useCaseId} ${uc?.name || ''} ${uc?.description || ''} ${uc?.component || ''} ${uc?.category || ''} ${r.role} ${r.status}`.toLowerCase();
       const matchesQuery = !query || hay.includes(query.toLowerCase());
-      const matchesComponent = filterComponent === 'all' || (uc?.component || '').toLowerCase() === filterComponent.toLowerCase();
       const matchesSource = filterSource === 'all' || (uc?.source || 'unknown') === filterSource;
-      if (matchesQuery && matchesComponent && matchesSource) {
+      if (matchesQuery && matchesSource) {
         map.set(r.useCaseId, [...(map.get(r.useCaseId) || []), r]);
       }
     });
     return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-  }, [data.rules, filterComponent, filterSource, query, useCases]);
+  }, [data.rules, filterSource, query, useCases]);
   return (
     <SurfaceCard className="p-4 md:p-5 space-y-4">
       <div className="flex items-center justify-between">
-        <div><h2 className="text-lg font-bold text-[var(--text)]">Use Case Tree</h2><p className="text-sm text-[var(--text-soft)]">Component to use case to helper, detection, correlation, and Jira-visible rules.</p></div>
+        <div><h2 className="text-lg font-bold text-[var(--text)]">Use Case Tree</h2><p className="text-sm text-[var(--text-soft)]">Use case to helper, detection, correlation, and Jira-visible rules.</p></div>
         <Badge tone="muted">{grouped.length} use cases</Badge>
       </div>
       <SubtleCard className="!flex !flex-row !flex-nowrap items-center gap-2 overflow-x-auto p-3">
         <Input className="h-9 w-[260px] min-w-[260px] shrink-0 text-xs" placeholder="Search use case, id, role, status..." value={query} onChange={(e) => setQuery(e.target.value)} />
-        <Select className="h-9 min-w-[170px] shrink-0 text-xs font-semibold" value={filterComponent} onChange={(e) => setFilterComponent(e.target.value)}><option value="all">All components</option>{USE_CASE_COMPONENTS.map((item) => <option key={item} value={item}>{item}</option>)}</Select>
         <Select className="h-9 min-w-[140px] shrink-0 text-xs font-semibold" value={filterSource} onChange={(e) => setFilterSource(e.target.value)}><option value="all">All sources</option><option value="custom">Custom</option><option value="builtin">Built-in</option></Select>
       </SubtleCard>
       <div className="space-y-3">
