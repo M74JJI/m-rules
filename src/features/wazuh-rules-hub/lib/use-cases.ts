@@ -249,11 +249,10 @@ export const getUseCaseById = (catalog: UseCaseRecord[], id: string) => catalog.
 
 export const getUseCaseLabel = (catalog: UseCaseRecord[], id: string) => getUseCaseById(catalog, id)?.name || id;
 
-export const buildUseCaseId = (component: string, name: string, existingIds: Iterable<string>) => {
-  const componentSlug = slugifyUseCaseToken(component) || 'custom';
+export const buildUseCaseId = (_component: string, name: string, existingIds: Iterable<string>) => {
   const nameSlug = slugifyUseCaseToken(name) || 'detection';
   const used = new Set(existingIds);
-  const base = `uc_${componentSlug}_${nameSlug}`;
+  const base = `uc_${nameSlug}`;
   if (!used.has(base)) return base;
   let n = 2;
   while (used.has(`${base}_${n}`)) n += 1;

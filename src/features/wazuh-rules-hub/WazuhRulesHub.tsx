@@ -1471,10 +1471,10 @@ function UseCaseStudio({
     <div className="space-y-4">
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(340px,420px)_1fr]">
         <SurfaceCard className="p-4 space-y-4">
-          <div><h2 className="text-lg font-bold text-[var(--text)]">Use Case Studio</h2><p className="text-sm text-[var(--text-soft)]">Register use cases once, get stable IDs, then reference those IDs inside XML with <code>&lt;info type="text"&gt;use_case:...&lt;/info&gt;</code>.</p></div>
+          <div><h2 className="text-lg font-bold text-[var(--text)]">Use Case Studio</h2><p className="text-sm text-[var(--text-soft)]">Register global use cases once, get stable IDs like <code>uc_here_name_of_use</code>, then reference those IDs inside XML with <code>&lt;info type="text"&gt;use_case:...&lt;/info&gt;</code>.</p></div>
           <div className="grid grid-cols-2 gap-3">
             <div><FieldLabel>Component</FieldLabel><Select className="w-full" value={component} onChange={(e) => setComponent(e.target.value as (typeof USE_CASE_COMPONENTS)[number])}>{USE_CASE_COMPONENTS.map((item) => <option key={item} value={item}>{item}</option>)}</Select></div>
-            <div><FieldLabel>Generated ID</FieldLabel><Input className="w-full" value={suggestedId} readOnly /></div>
+            <div><FieldLabel>Global ID</FieldLabel><Input className="w-full" value={suggestedId} readOnly /></div>
             <div className="col-span-2"><FieldLabel>Full name</FieldLabel><Input className="w-full" value={name} onChange={(e) => setName(e.target.value)} placeholder="Azure impossible travel detection" /></div>
             <div><FieldLabel>Short name</FieldLabel><Input className="w-full" value={shortName} onChange={(e) => setShortName(e.target.value)} placeholder="Impossible Travel" /></div>
             <div><FieldLabel>Category</FieldLabel><Input className="w-full" value={category} onChange={(e) => setCategory(e.target.value)} placeholder="Identity & Access" /></div>
