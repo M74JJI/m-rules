@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import { readdir, stat } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import type { UploadedFile } from './types';
@@ -17,6 +18,9 @@ export type ManagerArchiveSnapshot = {
 const DEFAULT_MANAGER_ARCHIVE_DIR = '/opt/mercure/siem-managers';
 const ARCHIVE_EXTENSIONS = ['.tar.gz', '.tgz'];
 const XML_SOURCE_RE = /(^|\/)(rules|decoders)\/[^/]+\.xml$/i;
+const TAR_EXTRACT_CHUNK_SIZE = 100;
+
+let cachedSnapshot: ManagerArchiveSnapshot | null = null;
 
 const getManagerArchiveDir = () => {
   const configured = process.env.SIEM_MANAGERS_DIR || process.env.NEXT_PUBLIC_SIEM_MANAGERS_DIR;
@@ -66,7 +70,29 @@ const listArchiveXmlEntries = async (archivePath: string) => {
     .sort((a, b) => a.localeCompare(b));
 };
 
-const readArchiveEntry = async (archivePath: string, entry: string) => runTar(['-xOzf', archivePath, entry]);
+const extractArchiveEntries = async (archivePath: string, entries: string[]) => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'rules-hub-managers-'));
+  try {
+    for (let index = 0; index < entries.length; index += TAR_EXTRACT_CHUNK_SIZE) {
+      const chunk = entries.slice(index, index + TAR_EXTRACT_CHUNK_SIZE);
+      await runTar(['-xzf', archivePath, '-C', tempDir, ...chunk]);
+    }
+
+    const contents: Array<{ entry: string; content: string }> = [];
+    for (const entry of entries) {
+      const entryPath = path.join(tempDir, ...entry.replaceAll('\\', '/').split('/'));
+      contents.push({ entry, content: await readFile(entryPath, 'utf8') });
+    }
+    return contents;
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+};
+
+const buildFingerprint = (archives: ManagerArchiveSnapshot['archives']) =>
+  createHash('sha256')
+    .update(JSON.stringify(archives.map((archive) => [archive.name, archive.size, archive.modifiedAt, archive.xmlFiles])))
+    .digest('hex');
 
 export async function readManagerArchiveSnapshot(): Promise<ManagerArchiveSnapshot> {
   const rootPath = getManagerArchiveDir();
@@ -119,32 +145,36 @@ export async function readManagerArchiveSnapshot(): Promise<ManagerArchiveSnapsh
         modifiedAt: archiveStat.mtime.toISOString(),
         xmlFiles: xmlEntries.length,
       });
-
-      for (const entry of xmlEntries) {
-        try {
-          const content = await readArchiveEntry(archivePath, entry);
-          const sourceName = `${archiveName}/${entry}`;
-          files.push({
-            name: sourceName,
-            size: Buffer.byteLength(content, 'utf8'),
-            type: inferFileType(sourceName, content),
-            content,
-            hash: hashFile(sourceName, content),
-          });
-        } catch (error) {
-          errors.push(`${archiveName}/${entry}: ${error instanceof Error ? error.message : 'failed to read entry'}`);
-        }
-      }
     } catch (error) {
       errors.push(`${archiveName}: ${error instanceof Error ? error.message : 'failed to inspect archive'}`);
     }
   }
 
-  const fingerprint = createHash('sha256')
-    .update(JSON.stringify(archives.map((archive) => [archive.name, archive.size, archive.modifiedAt, archive.xmlFiles])))
-    .digest('hex');
+  const fingerprint = buildFingerprint(archives);
+  if (cachedSnapshot?.rootPath === rootPath && cachedSnapshot.fingerprint === fingerprint) {
+    return { ...cachedSnapshot, loadedAt };
+  }
 
-  return {
+  for (const archive of archives) {
+    try {
+      const xmlEntries = await listArchiveXmlEntries(archive.path);
+      const extracted = await extractArchiveEntries(archive.path, xmlEntries);
+      for (const { entry, content } of extracted) {
+        const sourceName = `${archive.name}/${entry}`;
+        files.push({
+          name: sourceName,
+          size: Buffer.byteLength(content, 'utf8'),
+          type: inferFileType(sourceName, content),
+          content,
+          hash: hashFile(sourceName, content),
+        });
+      }
+    } catch (error) {
+      errors.push(`${archive.name}: ${error instanceof Error ? error.message : 'failed to extract archive XML'}`);
+    }
+  }
+
+  const snapshot = {
     rootPath,
     configured: Boolean(rootPath),
     archives,
@@ -153,4 +183,6 @@ export async function readManagerArchiveSnapshot(): Promise<ManagerArchiveSnapsh
     loadedAt,
     errors,
   };
+  cachedSnapshot = snapshot;
+  return snapshot;
 }
