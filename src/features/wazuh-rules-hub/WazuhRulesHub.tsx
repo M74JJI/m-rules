@@ -23,18 +23,24 @@ type ManagerArchiveStatus = {
   rootPath: string | null;
   archiveCount: number;
   fileCount: number;
+  completedArchives?: number;
+  completedXmlFiles?: number;
+  totalArchives?: number;
+  totalXmlFiles?: number;
+  currentArchive?: string;
+  phase?: 'idle' | 'scanning' | 'extracting' | 'ready' | 'error';
+  cached?: boolean;
   loadedAt?: string;
   fingerprint?: string;
   errors: string[];
 };
-type ManagerFilesPayload = {
-  rootPath: string | null;
-  archives: Array<{ name: string; size: number; modifiedAt: string; xmlFiles: number }>;
-  files: UploadedFile[];
-  fingerprint: string;
-  loadedAt: string;
-  errors: string[];
-};
+type ManagerArchiveInfo = { name: string; size: number; modifiedAt: string; xmlFiles: number };
+type ManagerStreamEvent =
+  | { type: 'start'; rootPath: string | null; archives: ManagerArchiveInfo[]; totalArchives: number; totalXmlFiles: number; fingerprint: string; loadedAt: string; errors: string[]; cached: boolean }
+  | { type: 'archive'; archive: ManagerArchiveInfo; files: UploadedFile[]; completedArchives: number; completedXmlFiles: number; totalArchives: number; totalXmlFiles: number; errors: string[] }
+  | { type: 'archive-error'; archive: Pick<ManagerArchiveInfo, 'name' | 'xmlFiles'>; completedArchives: number; completedXmlFiles: number; totalArchives: number; totalXmlFiles: number; errors: string[] }
+  | { type: 'done'; rootPath: string | null; archives: ManagerArchiveInfo[]; files: UploadedFile[]; fingerprint: string; loadedAt: string; errors: string[]; cached: boolean }
+  | { type: 'error'; error: string };
 
 const empty: ParsedCollection = {
   files: [], rules: [], decoders: [], useCases: [], issues: [],
@@ -229,6 +235,9 @@ function RulesHubTopBar({
   const inputRef = useRef<HTMLInputElement>(null);
   const mitreTechniques = useMemo(() => new Set(data.rules.flatMap((rule) => rule.mitre)).size, [data.rules]);
   const highCriticalRules = useMemo(() => data.rules.filter((rule) => rule.level >= 11).length, [data.rules]);
+  const progressTotal = managerStatus.totalArchives || managerStatus.archiveCount || 0;
+  const progressDone = managerStatus.completedArchives || 0;
+  const progressPct = progressTotal ? Math.round((progressDone / progressTotal) * 100) : 0;
   const kpis = [
     { label: 'Rules', value: data.stats.rules, sub: 'parsed detections', tone: 'cyan' },
     { label: 'Decoders', value: data.stats.decoders, sub: 'lineage blocks', tone: 'purple' },
@@ -308,8 +317,30 @@ function RulesHubTopBar({
               <div className="text-[10px] uppercase tracking-wider text-[var(--text-soft)]">fallback</div>
             </button>
           </div>
+          {busy || managerStatus.phase === 'extracting' || managerStatus.phase === 'scanning' ? (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-3 text-[11px] text-[var(--text-soft)]">
+                <span className="truncate">
+                  {managerStatus.phase === 'scanning'
+                    ? 'Scanning archives'
+                    : managerStatus.currentArchive
+                      ? `Loading ${managerStatus.currentArchive}`
+                      : 'Loading manager source'}
+                </span>
+                <span className="shrink-0">{progressDone}/{progressTotal || '?'} archives</span>
+              </div>
+              <div className="h-2 overflow-hidden rounded-full bg-[var(--panel)]">
+                <div className="h-full bg-[var(--accent)] transition-all" style={{ width: `${progressPct}%` }} />
+              </div>
+              <div className="text-[11px] text-[var(--text-soft)]">
+                {fmt(managerStatus.completedXmlFiles || 0)}/{fmt(managerStatus.totalXmlFiles || 0)} XML files ready
+              </div>
+            </div>
+          ) : null}
           {managerStatus.loadedAt ? (
-            <div className="text-[11px] text-[var(--text-soft)]">Last refresh {new Date(managerStatus.loadedAt).toLocaleString()}</div>
+            <div className="text-[11px] text-[var(--text-soft)]">
+              Last refresh {new Date(managerStatus.loadedAt).toLocaleString()}{managerStatus.cached ? ' · cached' : ''}
+            </div>
           ) : null}
           {managerStatus.errors.length ? (
             <div className="rounded-md border border-destructive/25 bg-destructive/10 px-3 py-2 text-xs text-destructive">
@@ -1865,40 +1896,137 @@ export default function WazuhRulesHub({ currentUser, initialCustomUseCases = [] 
     rootPath: null,
     archiveCount: 0,
     fileCount: restored.files.length,
+    phase: 'idle',
     errors: [],
   });
 
-  const handleFilesLoaded = useCallback((uploaded: UploadedFile[]) => {
+  const handleFilesLoaded = useCallback((uploaded: UploadedFile[], persist = true) => {
     setFiles(uploaded);
     filesRef.current = uploaded;
     const parsed = parseCollection(uploaded, useCaseCatalog);
     setData(parsed);
-    rememberGraphCollection(parsed);
+    if (persist) rememberGraphCollection(parsed);
     if (uploaded.length > 0) setView('graph');
   }, [useCaseCatalog]);
 
   const refreshManagerFiles = useCallback(async () => {
     setBusy(true);
+    setManagerStatus((current) => ({
+      ...current,
+      phase: 'scanning',
+      completedArchives: 0,
+      completedXmlFiles: 0,
+      totalArchives: undefined,
+      totalXmlFiles: undefined,
+      currentArchive: undefined,
+      cached: false,
+      errors: [],
+    }));
     try {
-      const response = await fetch('/api/manager-files', { cache: 'no-store' });
+      const response = await fetch('/api/manager-files/stream', { cache: 'no-store' });
       if (!response.ok) throw new Error(`Manager source refresh failed (${response.status})`);
-      const payload = await response.json() as ManagerFilesPayload;
-      setManagerStatus({
-        rootPath: payload.rootPath,
-        archiveCount: payload.archives.length,
-        fileCount: payload.files.length,
-        loadedAt: payload.loadedAt,
-        fingerprint: payload.fingerprint,
-        errors: payload.errors,
-      });
-      if (payload.files.length > 0) {
-        handleFilesLoaded(payload.files);
-      } else if (!filesRef.current.length) {
-        setData(empty);
+      if (!response.body) throw new Error('Manager source stream unavailable');
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let streamedFiles: UploadedFile[] = [];
+
+      const handleEvent = (event: ManagerStreamEvent) => {
+        if (event.type === 'start') {
+          setManagerStatus({
+            rootPath: event.rootPath,
+            archiveCount: event.archives.length,
+            fileCount: 0,
+            completedArchives: 0,
+            completedXmlFiles: 0,
+            totalArchives: event.totalArchives,
+            totalXmlFiles: event.totalXmlFiles,
+            phase: event.cached ? 'ready' : 'extracting',
+            cached: event.cached,
+            loadedAt: event.loadedAt,
+            fingerprint: event.fingerprint,
+            errors: event.errors,
+          });
+          return;
+        }
+
+        if (event.type === 'archive') {
+          streamedFiles = [...streamedFiles, ...event.files];
+          setManagerStatus((current) => ({
+            ...current,
+            archiveCount: event.totalArchives,
+            fileCount: streamedFiles.length,
+            completedArchives: event.completedArchives,
+            completedXmlFiles: event.completedXmlFiles,
+            totalArchives: event.totalArchives,
+            totalXmlFiles: event.totalXmlFiles,
+            currentArchive: event.archive.name,
+            phase: 'extracting',
+            errors: event.errors,
+          }));
+          handleFilesLoaded(streamedFiles, false);
+          return;
+        }
+
+        if (event.type === 'archive-error') {
+          setManagerStatus((current) => ({
+            ...current,
+            completedArchives: event.completedArchives,
+            completedXmlFiles: event.completedXmlFiles,
+            totalArchives: event.totalArchives,
+            totalXmlFiles: event.totalXmlFiles,
+            currentArchive: event.archive.name,
+            phase: 'extracting',
+            errors: event.errors,
+          }));
+          return;
+        }
+
+        if (event.type === 'done') {
+          streamedFiles = event.files;
+          setManagerStatus({
+            rootPath: event.rootPath,
+            archiveCount: event.archives.length,
+            fileCount: event.files.length,
+            completedArchives: event.archives.length,
+            completedXmlFiles: event.files.length,
+            totalArchives: event.archives.length,
+            totalXmlFiles: event.files.length,
+            phase: 'ready',
+            cached: event.cached,
+            loadedAt: event.loadedAt,
+            fingerprint: event.fingerprint,
+            errors: event.errors,
+          });
+          if (event.files.length > 0) handleFilesLoaded(event.files, true);
+          else if (!filesRef.current.length) setData(empty);
+          return;
+        }
+
+        if (event.type === 'error') {
+          throw new Error(event.error);
+        }
+      };
+
+      for (;;) {
+        const { value, done } = await reader.read();
+        buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const rawLine of lines) {
+          if (!rawLine.trim()) continue;
+          handleEvent(JSON.parse(rawLine) as ManagerStreamEvent);
+        }
+        if (done) break;
+      }
+      if (buffer.trim()) {
+        handleEvent(JSON.parse(buffer) as ManagerStreamEvent);
       }
     } catch (error) {
       setManagerStatus((current) => ({
         ...current,
+        phase: 'error',
         errors: [error instanceof Error ? error.message : 'Failed to refresh manager source'],
       }));
     } finally {

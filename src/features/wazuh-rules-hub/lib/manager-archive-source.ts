@@ -8,8 +8,28 @@ import type { UploadedFile } from './types';
 export type ManagerArchiveSnapshot = {
   rootPath: string | null;
   configured: boolean;
-  archives: Array<{ name: string; path: string; size: number; modifiedAt: string; xmlFiles: number }>;
+  archives: ManagerArchiveInfo[];
   files: UploadedFile[];
+  fingerprint: string;
+  loadedAt: string;
+  errors: string[];
+};
+
+export type ManagerArchiveInfo = {
+  name: string;
+  path: string;
+  size: number;
+  modifiedAt: string;
+  xmlFiles: number;
+};
+
+export type ManagerArchiveWorkItem = ManagerArchiveInfo & { entries: string[] };
+
+export type ManagerArchiveManifest = {
+  rootPath: string | null;
+  configured: boolean;
+  archives: ManagerArchiveInfo[];
+  workItems: ManagerArchiveWorkItem[];
   fingerprint: string;
   loadedAt: string;
   errors: string[];
@@ -94,12 +114,26 @@ const buildFingerprint = (archives: ManagerArchiveSnapshot['archives']) =>
     .update(JSON.stringify(archives.map((archive) => [archive.name, archive.size, archive.modifiedAt, archive.xmlFiles])))
     .digest('hex');
 
-export async function readManagerArchiveSnapshot(): Promise<ManagerArchiveSnapshot> {
+export async function readManagerArchiveFiles(archive: ManagerArchiveWorkItem): Promise<UploadedFile[]> {
+  const extracted = await extractArchiveEntries(archive.path, archive.entries);
+  return extracted.map(({ entry, content }) => {
+    const sourceName = `${archive.name}/${entry}`;
+    return {
+      name: sourceName,
+      size: Buffer.byteLength(content, 'utf8'),
+      type: inferFileType(sourceName, content),
+      content,
+      hash: hashFile(sourceName, content),
+    };
+  });
+}
+
+export async function readManagerArchiveManifest(): Promise<ManagerArchiveManifest> {
   const rootPath = getManagerArchiveDir();
   const loadedAt = new Date().toISOString();
   const errors: string[] = [];
-  const archives: ManagerArchiveSnapshot['archives'] = [];
-  const files: UploadedFile[] = [];
+  const workItems: ManagerArchiveWorkItem[] = [];
+  const archives: ManagerArchiveInfo[] = [];
 
   try {
     const rootStat = await stat(rootPath);
@@ -108,7 +142,7 @@ export async function readManagerArchiveSnapshot(): Promise<ManagerArchiveSnapsh
         rootPath,
         configured: Boolean(rootPath),
         archives,
-        files,
+        workItems,
         fingerprint: '',
         loadedAt,
         errors: [`${rootPath} is not a directory.`],
@@ -119,7 +153,7 @@ export async function readManagerArchiveSnapshot(): Promise<ManagerArchiveSnapsh
       rootPath,
       configured: Boolean(rootPath),
       archives,
-      files,
+      workItems,
       fingerprint: '',
       loadedAt,
       errors: [error instanceof Error ? error.message : `Cannot read ${rootPath}.`],
@@ -138,51 +172,60 @@ export async function readManagerArchiveSnapshot(): Promise<ManagerArchiveSnapsh
     try {
       const archiveStat = await stat(archivePath);
       const xmlEntries = await listArchiveXmlEntries(archivePath);
-      archives.push({
+      const archive = {
         name: archiveName,
         path: archivePath,
         size: archiveStat.size,
         modifiedAt: archiveStat.mtime.toISOString(),
         xmlFiles: xmlEntries.length,
-      });
+      };
+      archives.push(archive);
+      workItems.push({ ...archive, entries: xmlEntries });
     } catch (error) {
       errors.push(`${archiveName}: ${error instanceof Error ? error.message : 'failed to inspect archive'}`);
     }
   }
 
   const fingerprint = buildFingerprint(archives);
-  if (cachedSnapshot?.rootPath === rootPath && cachedSnapshot.fingerprint === fingerprint) {
-    return { ...cachedSnapshot, loadedAt };
-  }
+  return { rootPath, configured: Boolean(rootPath), archives, workItems, fingerprint, loadedAt, errors };
+}
 
-  for (const archive of archives) {
+export function getCachedManagerArchiveSnapshot(rootPath: string | null, fingerprint: string): ManagerArchiveSnapshot | null {
+  if (cachedSnapshot?.rootPath === rootPath && cachedSnapshot.fingerprint === fingerprint) {
+    return cachedSnapshot;
+  }
+  return null;
+}
+
+export function rememberManagerArchiveSnapshot(snapshot: ManagerArchiveSnapshot) {
+  cachedSnapshot = snapshot;
+}
+
+export async function readManagerArchiveSnapshot(): Promise<ManagerArchiveSnapshot> {
+  const manifest = await readManagerArchiveManifest();
+  const cached = getCachedManagerArchiveSnapshot(manifest.rootPath, manifest.fingerprint);
+  if (cached) return { ...cached, loadedAt: manifest.loadedAt };
+
+  const files: UploadedFile[] = [];
+  const errors = [...manifest.errors];
+
+  for (const archive of manifest.workItems) {
     try {
-      const xmlEntries = await listArchiveXmlEntries(archive.path);
-      const extracted = await extractArchiveEntries(archive.path, xmlEntries);
-      for (const { entry, content } of extracted) {
-        const sourceName = `${archive.name}/${entry}`;
-        files.push({
-          name: sourceName,
-          size: Buffer.byteLength(content, 'utf8'),
-          type: inferFileType(sourceName, content),
-          content,
-          hash: hashFile(sourceName, content),
-        });
-      }
+      files.push(...await readManagerArchiveFiles(archive));
     } catch (error) {
       errors.push(`${archive.name}: ${error instanceof Error ? error.message : 'failed to extract archive XML'}`);
     }
   }
 
   const snapshot = {
-    rootPath,
-    configured: Boolean(rootPath),
-    archives,
+    rootPath: manifest.rootPath,
+    configured: manifest.configured,
+    archives: manifest.archives,
     files,
-    fingerprint,
-    loadedAt,
+    fingerprint: manifest.fingerprint,
+    loadedAt: manifest.loadedAt,
     errors,
   };
-  cachedSnapshot = snapshot;
+  rememberManagerArchiveSnapshot(snapshot);
   return snapshot;
 }
