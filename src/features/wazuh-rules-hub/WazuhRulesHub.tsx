@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { Badge, Button, FieldLabel, Input, SectionHeader, Select, SubtleCard, SurfaceCard, Textarea } from '@/components/ui/primitives';
 import { cx } from '@/lib/cx';
 import type { DecoderRecord, ParsedCollection, RuleRecord, UploadedFile, UseCaseRecord, ValidationIssue } from './lib/types';
@@ -52,6 +52,7 @@ const ucName = (catalog: UseCaseRecord[], id: string) => getUseCaseLabel(catalog
 
 const GRAPH_COLLECTION_KEY = 'wri.graphCollection.v1';
 const MANAGER_REFRESH_INTERVAL_MS = 60 * 60 * 1000;
+const TABLE_PAGE_SIZE = 100;
 const severityDotClass: Record<ValidationIssue['severity'], string> = {
   error: 'bg-destructive',
   warning: 'bg-[var(--warning)]',
@@ -91,18 +92,11 @@ const decoderChipClass = 'rounded-md border border-[var(--primary)]/20 bg-[var(-
 const decoderLinkClass = 'text-xs font-medium text-[var(--text)] hover:text-[var(--accent)] hover:underline';
 
 function rememberGraphCollection(parsed: ParsedCollection) {
-  if (typeof window === 'undefined') return;
-  try {
-    sessionStorage.setItem(GRAPH_COLLECTION_KEY, JSON.stringify(parsed));
-    try { localStorage.setItem(GRAPH_COLLECTION_KEY, JSON.stringify(parsed)); } catch {}
-  } catch {}
+  void parsed;
 }
 
 function restoreGraphCollection(): ParsedCollection {
-  if (typeof window === 'undefined') return empty;
-  const raw = sessionStorage.getItem(GRAPH_COLLECTION_KEY) || localStorage.getItem(GRAPH_COLLECTION_KEY);
-  if (!raw) return empty;
-  try { return JSON.parse(raw) as ParsedCollection; } catch { return empty; }
+  return empty;
 }
 
 const NAV_VIEWS: { id: ActiveView; label: string; desc: string; group: string }[] = [
@@ -168,6 +162,51 @@ function Chip({ children, kind }: { children: React.ReactNode; kind?: 'mitre' | 
   );
 }
 
+function usePagedRows<T>(rows: T[], pageSize = TABLE_PAGE_SIZE) {
+  const [page, setPage] = useState(0);
+  const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
+  useEffect(() => {
+    setPage((current) => Math.min(current, totalPages - 1));
+  }, [totalPages]);
+  const start = page * pageSize;
+  return {
+    page,
+    setPage,
+    totalPages,
+    pageRows: rows.slice(start, start + pageSize),
+    start,
+    end: Math.min(rows.length, start + pageSize),
+  };
+}
+
+function PageControls({
+  total,
+  page,
+  totalPages,
+  start,
+  end,
+  setPage,
+}: {
+  total: number;
+  page: number;
+  totalPages: number;
+  start: number;
+  end: number;
+  setPage: (page: number) => void;
+}) {
+  if (total <= TABLE_PAGE_SIZE) return null;
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-[var(--text-soft)]">
+      <span>{fmt(start + 1)}-{fmt(end)} of {fmt(total)}</span>
+      <div className="flex items-center gap-2">
+        <Button className="h-8 text-xs" disabled={page === 0} onClick={() => setPage(Math.max(0, page - 1))}>Prev</Button>
+        <span>Page {fmt(page + 1)} / {fmt(totalPages)}</span>
+        <Button className="h-8 text-xs" disabled={page >= totalPages - 1} onClick={() => setPage(Math.min(totalPages - 1, page + 1))}>Next</Button>
+      </div>
+    </div>
+  );
+}
+
 // ---- Upload Card ----
 function UploadCard({ onLoaded, files }: { onLoaded: (files: UploadedFile[]) => void; files: UploadedFile[] }) {
   const [busy, setBusy] = useState(false);
@@ -202,12 +241,13 @@ function UploadCard({ onLoaded, files }: { onLoaded: (files: UploadedFile[]) => 
       </div>
       {files.length > 0 && (
         <div className="flex flex-wrap gap-2">
-          {files.map((f) => (
+          {files.slice(0, 24).map((f) => (
             <SubtleCard key={f.hash} className="inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-xs">
               <span className="text-[var(--text)] font-medium">{f.name}</span>
               <span className="text-[var(--text-soft)]">{f.type} · {(f.size / 1024).toFixed(1)} KB</span>
             </SubtleCard>
           ))}
+          {files.length > 24 ? <Badge tone="muted" className="text-xs">+{fmt(files.length - 24)} more</Badge> : null}
         </div>
       )}
       {files.length === 0 && (
@@ -463,10 +503,13 @@ function CommandCenter({ data }: { data: ParsedCollection }) {
 // ---- Rule Explorer ----
 function RuleExplorer({ data, onSelect }: { data: ParsedCollection; onSelect: (s: Selected) => void }) {
   const [q, setQ] = useState(''); const [role, setRole] = useState('all'); const [status, setStatus] = useState('all'); const [jira, setJira] = useState('all');
+  const deferredQ = useDeferredValue(q);
   const rows = useMemo(() => data.rules.filter((r) => {
+    const query = deferredQ.toLowerCase();
     const hay = `${r.id} ${r.description} ${r.groups.join(' ')} ${r.mitre.join(' ')} ${r.useCaseId} ${r.fields.map(f => `${f.name} ${f.value}`).join(' ')}`.toLowerCase();
-    return (!q || hay.includes(q.toLowerCase())) && (role === 'all' || r.role === role) && (status === 'all' || r.status === status) && (jira === 'all' || String(r.jiraVisible) === jira);
-  }), [data.rules, q, role, status, jira]);
+    return (!query || hay.includes(query)) && (role === 'all' || r.role === role) && (status === 'all' || r.status === status) && (jira === 'all' || String(r.jiraVisible) === jira);
+  }), [data.rules, deferredQ, role, status, jira]);
+  const paged = usePagedRows(rows);
   const roles = [...new Set(data.rules.map(r => r.role))]; const statuses = [...new Set(data.rules.map(r => r.status))];
   return (
     <SurfaceCard className="p-4 md:p-5 space-y-4">
@@ -483,11 +526,12 @@ function RuleExplorer({ data, onSelect }: { data: ParsedCollection; onSelect: (s
         <Select className="h-9 min-w-[160px] shrink-0 text-xs font-semibold" value={status} onChange={(e) => setStatus(e.target.value)}><option value="all">All status</option>{statuses.map(s => <option key={s}>{s}</option>)}</Select>
         <Select className="h-9 min-w-[170px] shrink-0 text-xs font-semibold" value={jira} onChange={(e) => setJira(e.target.value)}><option value="all">All Jira</option><option value="true">Jira visible</option><option value="false">Jira hidden</option></Select>
       </SubtleCard>
+      <PageControls total={rows.length} page={paged.page} totalPages={paged.totalPages} start={paged.start} end={paged.end} setPage={paged.setPage} />
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead><tr className="border-b border-[var(--border)] text-left text-xs text-[var(--text-soft)] uppercase tracking-wider"><th className="p-2">ID</th><th className="p-2">Lvl</th><th className="p-2">Role</th><th className="p-2">Status</th><th className="p-2">Use Case</th><th className="p-2">Description</th><th className="p-2">MITRE</th><th className="p-2">Groups</th></tr></thead>
           <tbody>
-            {rows.map(r => (
+            {paged.pageRows.map(r => (
               <tr key={`${r.sourceFile}-${r.id}`} onClick={() => onSelect({ type: 'rule', item: r })} className="border-b border-[var(--border)] hover:bg-[var(--accent-soft)] cursor-pointer transition-colors">
                 <td className="p-2"><span className="rounded-md bg-[var(--accent-soft)] px-2 py-0.5 text-xs font-mono font-bold text-[var(--accent)]">{r.id}</span></td>
                 <td className="p-2"><span className={cx('font-semibold', levelTextClass(r.severity))}>{r.level}</span></td>
@@ -502,6 +546,7 @@ function RuleExplorer({ data, onSelect }: { data: ParsedCollection; onSelect: (s
           </tbody>
         </table>
       </div>
+      <PageControls total={rows.length} page={paged.page} totalPages={paged.totalPages} start={paged.start} end={paged.end} setPage={paged.setPage} />
     </SurfaceCard>
   );
 }
@@ -509,7 +554,9 @@ function RuleExplorer({ data, onSelect }: { data: ParsedCollection; onSelect: (s
 // ---- Decoder Explorer ----
 function DecoderExplorer({ data, onSelect }: { data: ParsedCollection; onSelect: (s: Selected) => void }) {
   const [q, setQ] = useState('');
-  const rows = useMemo(() => data.decoders.filter(d => `${d.name} ${d.parent || ''} ${d.orderFields.join(' ')} ${d.regex.join(' ')}`.toLowerCase().includes(q.toLowerCase())), [data.decoders, q]);
+  const deferredQ = useDeferredValue(q);
+  const rows = useMemo(() => data.decoders.filter(d => `${d.name} ${d.parent || ''} ${d.orderFields.join(' ')} ${d.regex.join(' ')}`.toLowerCase().includes(deferredQ.toLowerCase())), [data.decoders, deferredQ]);
+  const paged = usePagedRows(rows);
   return (
     <SurfaceCard className="p-4 md:p-5 space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
@@ -519,11 +566,12 @@ function DecoderExplorer({ data, onSelect }: { data: ParsedCollection; onSelect:
       <SubtleCard className="p-3">
         <Input placeholder="Search decoder, parent, order field, regex..." value={q} onChange={(e) => setQ(e.target.value)} />
       </SubtleCard>
+      <PageControls total={rows.length} page={paged.page} totalPages={paged.totalPages} start={paged.start} end={paged.end} setPage={paged.setPage} />
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead><tr className="border-b border-[var(--border)] text-left text-xs text-[var(--text-soft)] uppercase tracking-wider"><th className="p-2">Decoder</th><th className="p-2">Parent</th><th className="p-2">Order Fields</th><th className="p-2">Regex</th><th className="p-2">Source</th></tr></thead>
           <tbody>
-            {rows.map((d, i) => (
+            {paged.pageRows.map((d, i) => (
               <tr key={`${d.name}-${i}`} onClick={() => onSelect({ type: 'decoder', item: d })} className="border-b border-[var(--border)] hover:bg-[var(--accent-soft)] cursor-pointer transition-colors">
                 <td className="p-2"><span className={decoderChipClass}>{d.name}</span></td>
                 <td className="p-2 text-[var(--text)]">{d.parent || 'none'}</td>
@@ -535,6 +583,7 @@ function DecoderExplorer({ data, onSelect }: { data: ParsedCollection; onSelect:
           </tbody>
         </table>
       </div>
+      <PageControls total={rows.length} page={paged.page} totalPages={paged.totalPages} start={paged.start} end={paged.end} setPage={paged.setPage} />
     </SurfaceCard>
   );
 }
@@ -542,12 +591,15 @@ function DecoderExplorer({ data, onSelect }: { data: ParsedCollection; onSelect:
 // ---- Field Coverage Matrix ----
 function FieldCoverageMatrix({ data, onSelect }: { data: ParsedCollection; onSelect: (s: Selected) => void }) {
   const [q, setQ] = useState('');
+  const deferredQ = useDeferredValue(q);
   const [filterStatus, setFilterStatus] = useState<'all' | 'covered' | 'rule_only' | 'decoder_only'>('all');
   const intel = useMemo(() => buildDecoderIntelligence(data), [data]);
   const rows = useMemo(() => intel.matrixRows.filter((row) => {
+    const query = deferredQ.toLowerCase();
     const hay = `${row.field} ${row.status} ${row.producedBy.map((d) => d.name).join(' ')} ${row.usedByRules.map((r) => `${r.id} ${r.description}`).join(' ')}`.toLowerCase();
-    return (filterStatus === 'all' || row.status === filterStatus) && (!q || hay.includes(q.toLowerCase()));
-  }), [intel.matrixRows, q, filterStatus]);
+    return (filterStatus === 'all' || row.status === filterStatus) && (!query || hay.includes(query));
+  }), [intel.matrixRows, deferredQ, filterStatus]);
+  const paged = usePagedRows(rows);
 
   return (
     <div className="space-y-4">
@@ -568,11 +620,12 @@ function FieldCoverageMatrix({ data, onSelect }: { data: ParsedCollection; onSel
           <Input className="h-9 w-[260px] min-w-[260px] shrink-0 text-xs" placeholder="Search field, decoder, rule..." value={q} onChange={(e) => setQ(e.target.value)} />
           <Select className="h-9 min-w-[170px] shrink-0 text-xs font-semibold" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value as typeof filterStatus)}><option value="all">All</option><option value="covered">Covered</option><option value="rule_only">Rule-only</option><option value="decoder_only">Decoder-only</option></Select>
         </SubtleCard>
+        <PageControls total={rows.length} page={paged.page} totalPages={paged.totalPages} start={paged.start} end={paged.end} setPage={paged.setPage} />
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead><tr className="border-b border-[var(--border)] text-left text-xs text-[var(--text-soft)] uppercase tracking-wider"><th className="p-2">Field</th><th className="p-2">Status</th><th className="p-2">Produced By</th><th className="p-2">Used By Rules</th><th className="p-2">Use Cases</th><th className="p-2">Jira/Crit</th></tr></thead>
             <tbody>
-              {rows.map((row) => (
+              {paged.pageRows.map((row) => (
                 <tr key={row.field} className="border-b border-[var(--border)]">
                   <td className="p-2"><span className="rounded-md border border-[var(--border)] bg-[var(--panel)] px-2 py-0.5 text-xs font-mono font-bold text-[var(--text)]">{row.field}</span></td>
                   <td className="p-2"><span className={cx('rounded-md px-2 py-0.5 text-xs font-semibold', row.status === 'covered' ? statusPillClass('success') : row.status === 'rule_only' ? statusPillClass('danger') : statusPillClass('warning'))}>{row.status}</span></td>
@@ -585,6 +638,7 @@ function FieldCoverageMatrix({ data, onSelect }: { data: ParsedCollection; onSel
             </tbody>
           </table>
         </div>
+        <PageControls total={rows.length} page={paged.page} totalPages={paged.totalPages} start={paged.start} end={paged.end} setPage={paged.setPage} />
       </SurfaceCard>
     </div>
   );
@@ -1088,14 +1142,16 @@ function MitreView({ data, onSelect }: { data: ParsedCollection; onSelect: (s: S
   const grouped = useMemo(() => {
     const map = new Map<string, RuleRecord[]>(); data.rules.forEach(r => r.mitre.forEach(m => map.set(m, [...(map.get(m) || []), r]))); return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   }, [data.rules]);
+  const paged = usePagedRows(grouped);
   return (
     <SurfaceCard className="p-4 md:p-5 space-y-4">
       <div className="flex items-center justify-between">
         <div><h2 className="text-lg font-bold text-[var(--text)]">MITRE ATT&amp;CK Coverage</h2><p className="text-sm text-[var(--text-soft)]">Technique-to-rule mapping with use-case links.</p></div>
         <Badge tone="muted">{grouped.length} techniques</Badge>
       </div>
+      <PageControls total={grouped.length} page={paged.page} totalPages={paged.totalPages} start={paged.start} end={paged.end} setPage={paged.setPage} />
       <div className="space-y-3">
-        {grouped.map(([tech, rules]) => (
+        {paged.pageRows.map(([tech, rules]) => (
           <div key={tech} className="border border-[var(--border)] rounded-lg p-3">
             <div className="flex items-center justify-between">
               <span className="font-bold text-[var(--text)]">{tech}</span>
@@ -1108,21 +1164,24 @@ function MitreView({ data, onSelect }: { data: ParsedCollection; onSelect: (s: S
         ))}
         {grouped.length === 0 && <div className="text-sm text-[var(--text-soft)] italic">No MITRE mappings parsed yet.</div>}
       </div>
+      <PageControls total={grouped.length} page={paged.page} totalPages={paged.totalPages} start={paged.start} end={paged.end} setPage={paged.setPage} />
     </SurfaceCard>
   );
 }
 
 // ---- Validation Center ----
 function ValidationCenter({ data }: { data: ParsedCollection }) {
-  const sorted = [...data.issues].sort((a, b) => ({ error: 0, warning: 1, info: 2 }[a.severity] - { error: 0, warning: 1, info: 2 }[b.severity]));
+  const sorted = useMemo(() => [...data.issues].sort((a, b) => ({ error: 0, warning: 1, info: 2 }[a.severity] - { error: 0, warning: 1, info: 2 }[b.severity])), [data.issues]);
+  const paged = usePagedRows(sorted);
   return (
     <SurfaceCard className="p-4 md:p-5 space-y-4">
       <div className="flex items-center justify-between">
         <div><h2 className="text-lg font-bold text-[var(--text)]">Validation Center</h2><p className="text-sm text-[var(--text-soft)]">Broken dependencies, missing use cases, duplicate IDs, decoder issues.</p></div>
         <Badge tone="danger">{sorted.length} issues</Badge>
       </div>
+      <PageControls total={sorted.length} page={paged.page} totalPages={paged.totalPages} start={paged.start} end={paged.end} setPage={paged.setPage} />
       <div className="space-y-2">
-        {sorted.map((i, idx) => (
+        {paged.pageRows.map((i, idx) => (
           <div key={idx} className="border border-[var(--border)] rounded-lg p-3">
             <div className="flex items-start justify-between gap-2">
               <div>
@@ -1136,17 +1195,27 @@ function ValidationCenter({ data }: { data: ParsedCollection }) {
         ))}
         {sorted.length === 0 && <div className="text-sm text-[var(--text-soft)] italic">No issues found for loaded files.</div>}
       </div>
+      <PageControls total={sorted.length} page={paged.page} totalPages={paged.totalPages} start={paged.start} end={paged.end} setPage={paged.setPage} />
     </SurfaceCard>
   );
 }
 
 // ---- Source Files View ----
 function FilesView({ data }: { data: ParsedCollection }) {
+  const paged = usePagedRows(data.files);
+  const counts = useMemo(() => {
+    const rules = new Map<string, number>();
+    const decoders = new Map<string, number>();
+    data.rules.forEach((rule) => rules.set(rule.sourceFile, (rules.get(rule.sourceFile) || 0) + 1));
+    data.decoders.forEach((decoder) => decoders.set(decoder.sourceFile, (decoders.get(decoder.sourceFile) || 0) + 1));
+    return { rules, decoders };
+  }, [data.rules, data.decoders]);
   return (
     <SurfaceCard className="p-4 md:p-5 space-y-4">
       <div><h2 className="text-lg font-bold text-[var(--text)]">Source Files</h2><p className="text-sm text-[var(--text-soft)]">Raw file evidence, type detection, hashes, and parsed object counts.</p></div>
+      <PageControls total={data.files.length} page={paged.page} totalPages={paged.totalPages} start={paged.start} end={paged.end} setPage={paged.setPage} />
       <div className="space-y-2">
-        {data.files.map(f => (
+        {paged.pageRows.map(f => (
           <div key={f.hash} className="border border-[var(--border)] rounded-lg p-3">
             <div className="flex items-center justify-between">
               <span className="font-semibold text-[var(--text)]">{f.name}</span>
@@ -1154,13 +1223,14 @@ function FilesView({ data }: { data: ParsedCollection }) {
             </div>
             <div className="text-xs text-[var(--text-soft)] mt-1 font-mono">sha256 {f.hash.slice(0, 24)}...</div>
             <div className="flex gap-2 mt-2">
-              <Chip>{data.rules.filter(r => r.sourceFile === f.name).length} rules</Chip>
-              <Chip>{data.decoders.filter(d => d.sourceFile === f.name).length} decoders</Chip>
+              <Chip>{counts.rules.get(f.name) || 0} rules</Chip>
+              <Chip>{counts.decoders.get(f.name) || 0} decoders</Chip>
             </div>
           </div>
         ))}
         {data.files.length === 0 && <div className="text-sm text-[var(--text-soft)] italic">No files loaded yet.</div>}
       </div>
+      <PageControls total={data.files.length} page={paged.page} totalPages={paged.totalPages} start={paged.start} end={paged.end} setPage={paged.setPage} />
     </SurfaceCard>
   );
 }
@@ -1615,20 +1685,23 @@ function UseCaseStudio({
 // ---- Use Case Tree ----
 function UseCaseTree({ data, useCases, onSelect }: { data: ParsedCollection; useCases: UseCaseRecord[]; onSelect: (s: Selected) => void }) {
   const [query, setQuery] = useState('');
+  const deferredQuery = useDeferredValue(query);
   const [filterSource, setFilterSource] = useState('all');
   const grouped = useMemo(() => {
     const map = new Map<string, RuleRecord[]>();
+    const queryText = deferredQuery.toLowerCase();
     data.rules.forEach((r) => {
       const uc = getUseCaseById(useCases, r.useCaseId);
       const hay = `${r.useCaseId} ${uc?.name || ''} ${uc?.description || ''} ${uc?.component || ''} ${uc?.category || ''} ${r.role} ${r.status}`.toLowerCase();
-      const matchesQuery = !query || hay.includes(query.toLowerCase());
+      const matchesQuery = !queryText || hay.includes(queryText);
       const matchesSource = filterSource === 'all' || (uc?.source || 'unknown') === filterSource;
       if (matchesQuery && matchesSource) {
         map.set(r.useCaseId, [...(map.get(r.useCaseId) || []), r]);
       }
     });
     return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-  }, [data.rules, filterSource, query, useCases]);
+  }, [data.rules, filterSource, deferredQuery, useCases]);
+  const paged = usePagedRows(grouped);
   return (
     <SurfaceCard className="p-4 md:p-5 space-y-4">
       <div className="flex items-center justify-between">
@@ -1639,8 +1712,9 @@ function UseCaseTree({ data, useCases, onSelect }: { data: ParsedCollection; use
         <Input className="h-9 w-[260px] min-w-[260px] shrink-0 text-xs" placeholder="Search use case, id, role, status..." value={query} onChange={(e) => setQuery(e.target.value)} />
         <Select className="h-9 min-w-[140px] shrink-0 text-xs font-semibold" value={filterSource} onChange={(e) => setFilterSource(e.target.value)}><option value="all">All sources</option><option value="custom">Custom</option><option value="builtin">Built-in</option></Select>
       </SubtleCard>
+      <PageControls total={grouped.length} page={paged.page} totalPages={paged.totalPages} start={paged.start} end={paged.end} setPage={paged.setPage} />
       <div className="space-y-3">
-        {grouped.map(([id, rules]) => {
+        {paged.pageRows.map(([id, rules]) => {
           const uc = getUseCaseById(useCases, id);
           const byRole = new Map<string, RuleRecord[]>(); rules.forEach((r) => byRole.set(r.role, [...(byRole.get(r.role) || []), r]));
           return (
@@ -1664,6 +1738,7 @@ function UseCaseTree({ data, useCases, onSelect }: { data: ParsedCollection; use
           );
         })}
       </div>
+      <PageControls total={grouped.length} page={paged.page} totalPages={paged.totalPages} start={paged.start} end={paged.end} setPage={paged.setPage} />
     </SurfaceCard>
   );
 }
@@ -1671,6 +1746,7 @@ function UseCaseTree({ data, useCases, onSelect }: { data: ParsedCollection; use
 // ---- Coverage Map ----
 function CoverageMapView({ data, useCases }: { data: ParsedCollection; useCases: UseCaseRecord[] }) {
   const summary = useMemo(() => buildRulePackCoverage(data, useCases), [data, useCases]);
+  const paged = usePagedRows(summary.rows);
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
@@ -1683,11 +1759,12 @@ function CoverageMapView({ data, useCases }: { data: ParsedCollection; useCases:
       </div>
       <SurfaceCard className="p-4 md:p-5 space-y-4">
         <div><h2 className="text-lg font-bold text-[var(--text)]">Rule Pack Coverage Map</h2><p className="text-sm text-[var(--text-soft)]">Use-case scoring across detection depth, MITRE, decoder, QA, Jira, and standardization dimensions.</p></div>
+        <PageControls total={summary.rows.length} page={paged.page} totalPages={paged.totalPages} start={paged.start} end={paged.end} setPage={paged.setPage} />
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead><tr className="border-b border-[var(--border)] text-left text-xs text-[var(--text-soft)] uppercase tracking-wider"><th className="p-2">Use Case</th><th className="p-2">Score</th><th className="p-2">Rules</th><th className="p-2">Jira</th><th className="p-2">MITRE</th><th className="p-2">Weak Signals</th></tr></thead>
             <tbody>
-              {summary.rows.map((row) => (
+              {paged.pageRows.map((row) => (
                 <tr key={row.useCaseId} className="border-b border-[var(--border)]">
                   <td className="p-2 text-[var(--text)] font-medium">{row.name}</td>
                   <td className="p-2"><span className={cx('rounded-md px-2 py-0.5 text-xs font-semibold', row.status === 'strong' ? statusPillClass('success') : row.status === 'good' ? statusPillClass('info') : row.status === 'weak' ? statusPillClass('warning') : statusPillClass('danger'))}>{row.score} · {row.status}</span></td>
@@ -1700,6 +1777,7 @@ function CoverageMapView({ data, useCases }: { data: ParsedCollection; useCases:
             </tbody>
           </table>
         </div>
+        <PageControls total={summary.rows.length} page={paged.page} totalPages={paged.totalPages} start={paged.start} end={paged.end} setPage={paged.setPage} />
       </SurfaceCard>
     </div>
   );
@@ -1708,6 +1786,8 @@ function CoverageMapView({ data, useCases }: { data: ParsedCollection; useCases:
 // ---- Quality Scores ----
 function QualityScoresView({ data, onSelect }: { data: ParsedCollection; onSelect: (s: Selected) => void }) {
   const summary = useMemo(() => buildQualitySummary(data), [data]);
+  const paged = usePagedRows(summary.rules);
+  const ruleById = useMemo(() => new Map(data.rules.map((rule) => [rule.id, rule])), [data.rules]);
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
@@ -1720,12 +1800,13 @@ function QualityScoresView({ data, onSelect }: { data: ParsedCollection; onSelec
       </div>
       <SurfaceCard className="p-4 md:p-5 space-y-4">
         <div><h2 className="text-lg font-bold text-[var(--text)]">Rule Quality Scores</h2><p className="text-sm text-[var(--text-soft)]">8-dimension scoring per rule. Click a rule to inspect.</p></div>
+        <PageControls total={summary.rules.length} page={paged.page} totalPages={paged.totalPages} start={paged.start} end={paged.end} setPage={paged.setPage} />
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead><tr className="border-b border-[var(--border)] text-left text-xs text-[var(--text-soft)] uppercase tracking-wider"><th className="p-2">Rule</th><th className="p-2">Score</th><th className="p-2">Grade</th><th className="p-2">Use Case</th><th className="p-2">Level</th><th className="p-2">Role</th><th className="p-2">Warnings</th></tr></thead>
             <tbody>
-              {summary.rules.map((r) => (
-                <tr key={r.ruleId} className="border-b border-[var(--border)] hover:bg-[var(--accent-soft)] cursor-pointer" onClick={() => { const rule = data.rules.find(x => x.id === r.ruleId); if (rule) onSelect({ type: 'rule', item: rule }); }}>
+              {paged.pageRows.map((r) => (
+                <tr key={r.ruleId} className="border-b border-[var(--border)] hover:bg-[var(--accent-soft)] cursor-pointer" onClick={() => { const rule = ruleById.get(r.ruleId); if (rule) onSelect({ type: 'rule', item: rule }); }}>
                   <td className="p-2"><span className="font-mono text-xs font-medium text-[var(--text)]">{r.ruleId}</span></td>
                   <td className="p-2"><span className={cx('font-semibold', r.overall >= 88 ? 'text-emerald-700 dark:text-emerald-400' : r.overall >= 74 ? 'text-sky-700 dark:text-sky-400' : r.overall >= 58 ? 'text-[color:var(--warning)]' : r.overall >= 40 ? 'text-orange-700 dark:text-orange-400' : 'text-destructive')}>{r.overall}</span></td>
                   <td className="p-2"><span className={cx('rounded-md border px-2 py-0.5 text-xs font-semibold', r.grade === 'excellent' ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' : r.grade === 'good' ? 'border-sky-600/35 bg-sky-600/15 text-sky-800 dark:text-sky-200' : r.grade === 'needs_review' ? 'border-amber-500/25 bg-amber-500/10 text-amber-800 dark:text-amber-300' : r.grade === 'risky' ? 'border-orange-500/25 bg-orange-500/10 text-orange-700 dark:text-orange-300' : 'border-destructive/25 bg-destructive/10 text-destructive')}>{r.grade}</span></td>
@@ -1738,6 +1819,7 @@ function QualityScoresView({ data, onSelect }: { data: ParsedCollection; onSelec
             </tbody>
           </table>
         </div>
+        <PageControls total={summary.rules.length} page={paged.page} totalPages={paged.totalPages} start={paged.start} end={paged.end} setPage={paged.setPage} />
       </SurfaceCard>
     </div>
   );
@@ -1900,6 +1982,13 @@ export default function WazuhRulesHub({ currentUser, initialCustomUseCases = [] 
     errors: [],
   });
 
+  useEffect(() => {
+    try {
+      sessionStorage.removeItem(GRAPH_COLLECTION_KEY);
+      localStorage.removeItem(GRAPH_COLLECTION_KEY);
+    } catch {}
+  }, []);
+
   const handleFilesLoaded = useCallback((uploaded: UploadedFile[], persist = true) => {
     setFiles(uploaded);
     filesRef.current = uploaded;
@@ -1953,6 +2042,7 @@ export default function WazuhRulesHub({ currentUser, initialCustomUseCases = [] 
 
         if (event.type === 'archive') {
           streamedFiles = [...streamedFiles, ...event.files];
+          filesRef.current = streamedFiles;
           setManagerStatus((current) => ({
             ...current,
             archiveCount: event.totalArchives,
@@ -1965,7 +2055,6 @@ export default function WazuhRulesHub({ currentUser, initialCustomUseCases = [] 
             phase: 'extracting',
             errors: event.errors,
           }));
-          handleFilesLoaded(streamedFiles, false);
           return;
         }
 
