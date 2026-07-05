@@ -19,6 +19,22 @@ import { analyzeXmlRoundtrip, buildRoundtripMarkdownReport } from './lib/xml-rou
 type ActiveView = 'upload' | 'command' | 'templates' | 'composer' | 'useCaseStudio' | 'coverage' | 'quality' | 'usecases' | 'rules' | 'decoders' | 'fields' | 'graph' | 'mitre' | 'validation' | 'files' | 'search' | 'ai' | 'roundtrip' | 'fieldIntel';
 type Selected = { type: 'rule'; item: RuleRecord } | { type: 'decoder'; item: DecoderRecord } | { type: 'issue'; item: ValidationIssue } | null;
 type CurrentUser = { id?: string; name?: string | null; email?: string | null };
+type ManagerArchiveStatus = {
+  rootPath: string | null;
+  archiveCount: number;
+  fileCount: number;
+  loadedAt?: string;
+  fingerprint?: string;
+  errors: string[];
+};
+type ManagerFilesPayload = {
+  rootPath: string | null;
+  archives: Array<{ name: string; size: number; modifiedAt: string; xmlFiles: number }>;
+  files: UploadedFile[];
+  fingerprint: string;
+  loadedAt: string;
+  errors: string[];
+};
 
 const empty: ParsedCollection = {
   files: [], rules: [], decoders: [], useCases: [], issues: [],
@@ -29,6 +45,7 @@ const fmt = (n: number) => new Intl.NumberFormat().format(n);
 const ucName = (catalog: UseCaseRecord[], id: string) => getUseCaseLabel(catalog, id);
 
 const GRAPH_COLLECTION_KEY = 'wri.graphCollection.v1';
+const MANAGER_REFRESH_INTERVAL_MS = 60 * 60 * 1000;
 const severityDotClass: Record<ValidationIssue['severity'], string> = {
   error: 'bg-destructive',
   warning: 'bg-[var(--warning)]',
@@ -83,7 +100,7 @@ function restoreGraphCollection(): ParsedCollection {
 }
 
 const NAV_VIEWS: { id: ActiveView; label: string; desc: string; group: string }[] = [
-  { id: 'upload', label: 'Upload', desc: 'Load Wazuh rule & decoder XML files', group: 'Setup' },
+  { id: 'upload', label: 'Source', desc: 'Refresh manager archives', group: 'Setup' },
   { id: 'command', label: 'Overview', desc: 'Summary and status', group: 'Setup' },
   { id: 'rules', label: 'Rules', desc: 'Rule explorer and search', group: 'Intelligence' },
   { id: 'decoders', label: 'Decoders', desc: 'Decoder explorer', group: 'Intelligence' },
@@ -198,11 +215,15 @@ function RulesHubTopBar({
   data,
   hasData,
   busy,
+  managerStatus,
+  onRefreshManager,
   onLoadFiles,
 }: {
   data: ParsedCollection;
   hasData: boolean;
   busy: boolean;
+  managerStatus: ManagerArchiveStatus;
+  onRefreshManager: () => void;
   onLoadFiles: (files: FileList | null) => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -231,14 +252,16 @@ function RulesHubTopBar({
             Review rules, decoders, validation, graphs, and the use case catalog in one clean workspace.
           </p>
         </div>
-        <SubtleCard className="min-w-0 flex flex-col gap-4 p-4 xl:min-w-[300px]">
+        <SubtleCard className="min-w-0 flex flex-col gap-4 p-4 xl:min-w-[340px]">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--text)]">Import XML</div>
-              <div className="text-xs text-[var(--text)]/70">Rules, decoders, or combined files</div>
+              <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--text)]">Manager archives</div>
+              <div className="max-w-[210px] truncate text-xs text-[var(--text)]/70" title={managerStatus.rootPath || undefined}>
+                {managerStatus.rootPath || 'SIEM_MANAGERS_DIR not resolved'}
+              </div>
             </div>
-            <Button tone="primary" onClick={() => inputRef.current?.click()} disabled={busy}>
-              {busy ? 'Parsing...' : hasData ? 'Replace Files' : 'Upload Files'}
+            <Button tone="primary" onClick={onRefreshManager} disabled={busy}>
+              {busy ? 'Refreshing...' : 'Refresh'}
             </Button>
           </div>
           <input
@@ -264,9 +287,35 @@ function RulesHubTopBar({
             </div>
           ) : (
             <div className="rounded-md border border-dashed border-[var(--border)] bg-[var(--panel)] px-3 py-2 text-xs text-[var(--text)]/75">
-              Upload Wazuh XML to activate graph modes, validation, MITRE, fields, and rule intelligence.
+              Refresh the configured archive folder to activate graph modes, validation, MITRE, fields, and rule intelligence.
             </div>
           )}
+          <div className="grid grid-cols-3 gap-2 text-xs">
+            <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] px-2 py-1.5">
+              <div className="font-semibold text-[var(--text)]">{managerStatus.archiveCount}</div>
+              <div className="text-[10px] uppercase tracking-wider text-[var(--text-soft)]">archives</div>
+            </div>
+            <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] px-2 py-1.5">
+              <div className="font-semibold text-[var(--text)]">{managerStatus.fileCount}</div>
+              <div className="text-[10px] uppercase tracking-wider text-[var(--text-soft)]">xml files</div>
+            </div>
+            <button
+              type="button"
+              className="rounded-md border border-[var(--border)] bg-[var(--panel)] px-2 py-1.5 text-left text-[var(--text)] transition-colors hover:bg-[var(--panel-2)]"
+              onClick={() => inputRef.current?.click()}
+            >
+              <div className="font-semibold">Manual</div>
+              <div className="text-[10px] uppercase tracking-wider text-[var(--text-soft)]">fallback</div>
+            </button>
+          </div>
+          {managerStatus.loadedAt ? (
+            <div className="text-[11px] text-[var(--text-soft)]">Last refresh {new Date(managerStatus.loadedAt).toLocaleString()}</div>
+          ) : null}
+          {managerStatus.errors.length ? (
+            <div className="rounded-md border border-destructive/25 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+              {managerStatus.errors.slice(0, 2).join(' ')}
+            </div>
+          ) : null}
         </SubtleCard>
       </div>
       {hasData ? (
@@ -278,7 +327,7 @@ function RulesHubTopBar({
   );
 }
 
-function EmptyGraphWorkbench({ onLoadFiles, busy }: { onLoadFiles: (files: FileList | null) => void; busy: boolean }) {
+function EmptyGraphWorkbench({ onLoadFiles, onRefreshManager, busy }: { onLoadFiles: (files: FileList | null) => void; onRefreshManager: () => void; busy: boolean }) {
   const inputRef = useRef<HTMLInputElement>(null);
   return (
     <SurfaceCard className="rules-graph-workbench-empty flex min-h-[650px] flex-col overflow-hidden p-3">
@@ -287,9 +336,12 @@ function EmptyGraphWorkbench({ onLoadFiles, busy }: { onLoadFiles: (files: FileL
           <div className="text-sm font-bold text-[var(--text)]">Graph</div>
           <div className="text-xs text-[var(--text-soft)]">Load files to map rules and decoder relationships.</div>
         </div>
-        <Button tone="primary" onClick={() => inputRef.current?.click()} disabled={busy}>
-          {busy ? 'Parsing...' : 'Upload XML'}
-        </Button>
+        <div className="flex gap-2">
+          <Button tone="primary" onClick={onRefreshManager} disabled={busy}>
+            {busy ? 'Refreshing...' : 'Refresh Source'}
+          </Button>
+          <Button onClick={() => inputRef.current?.click()} disabled={busy}>Manual XML</Button>
+        </div>
         <input
           ref={inputRef}
           type="file"
@@ -306,9 +358,9 @@ function EmptyGraphWorkbench({ onLoadFiles, busy }: { onLoadFiles: (files: FileL
         <div className="absolute inset-0 rules-graph-grid opacity-70" />
         <div className="relative max-w-xl px-6 text-center">
           <div className="text-xs font-black uppercase tracking-[0.2em] text-[var(--accent)]">Graph Ready</div>
-          <h2 className="mt-2 text-2xl font-black text-[var(--text)]">Upload XML to build the dependency map</h2>
+          <h2 className="mt-2 text-2xl font-black text-[var(--text)]">Refresh manager archives to build the dependency map</h2>
           <p className="mt-2 text-sm leading-6 text-[var(--text-soft)]">
-            Rules-only, decoder-only, and combined imports are supported.
+            The server reads every configured manager archive and loads rules plus decoders automatically.
           </p>
         </div>
       </div>
@@ -1468,7 +1520,7 @@ function UseCaseStudio({
     <div className="space-y-4">
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(340px,420px)_1fr]">
         <SurfaceCard className="p-4 space-y-4">
-          <div><h2 className="text-lg font-bold text-[var(--text)]">Use Case Studio</h2><p className="text-sm text-[var(--text-soft)]">Register global use cases once, get stable IDs like <code>uc_here_name_of_use</code>, then reference those IDs inside XML with <code>&lt;info type="text"&gt;use_case:...&lt;/info&gt;</code>.</p></div>
+          <div><h2 className="text-lg font-bold text-[var(--text)]">Use Case Studio</h2><p className="text-sm text-[var(--text-soft)]">Register global use cases once, get stable IDs like <code>uc_here_name_of_use</code>, then reference those IDs inside XML with <code>&lt;info type=&quot;text&quot;&gt;use_case:...&lt;/info&gt;</code>.</p></div>
           <div className="grid grid-cols-2 gap-3">
             <div><FieldLabel>Global ID</FieldLabel><Input className="w-full" value={suggestedId} readOnly /></div>
             <div><FieldLabel>Scope</FieldLabel><Input className="w-full" value="Global" readOnly /></div>
@@ -1805,27 +1857,74 @@ export default function WazuhRulesHub({ currentUser, initialCustomUseCases = [] 
   const useCaseCatalog = useMemo(() => mergeUseCases(customUseCases), [customUseCases]);
   const [data, setData] = useState<ParsedCollection>(restored);
   const [files, setFiles] = useState<UploadedFile[]>(restored.files);
+  const filesRef = useRef<UploadedFile[]>(restored.files);
   const [view, setView] = useState<ActiveView>(data.files.length ? 'graph' : 'upload');
   const [selected, setSelected] = useState<Selected>(null);
   const [busy, setBusy] = useState(false);
+  const [managerStatus, setManagerStatus] = useState<ManagerArchiveStatus>({
+    rootPath: null,
+    archiveCount: 0,
+    fileCount: restored.files.length,
+    errors: [],
+  });
 
-  const handleFilesLoaded = (uploaded: UploadedFile[]) => {
+  const handleFilesLoaded = useCallback((uploaded: UploadedFile[]) => {
     setFiles(uploaded);
+    filesRef.current = uploaded;
     const parsed = parseCollection(uploaded, useCaseCatalog);
     setData(parsed);
     rememberGraphCollection(parsed);
     if (uploaded.length > 0) setView('graph');
-  };
+  }, [useCaseCatalog]);
+
+  const refreshManagerFiles = useCallback(async () => {
+    setBusy(true);
+    try {
+      const response = await fetch('/api/manager-files', { cache: 'no-store' });
+      if (!response.ok) throw new Error(`Manager source refresh failed (${response.status})`);
+      const payload = await response.json() as ManagerFilesPayload;
+      setManagerStatus({
+        rootPath: payload.rootPath,
+        archiveCount: payload.archives.length,
+        fileCount: payload.files.length,
+        loadedAt: payload.loadedAt,
+        fingerprint: payload.fingerprint,
+        errors: payload.errors,
+      });
+      if (payload.files.length > 0) {
+        handleFilesLoaded(payload.files);
+      } else if (!filesRef.current.length) {
+        setData(empty);
+      }
+    } catch (error) {
+      setManagerStatus((current) => ({
+        ...current,
+        errors: [error instanceof Error ? error.message : 'Failed to refresh manager source'],
+      }));
+    } finally {
+      setBusy(false);
+    }
+  }, [handleFilesLoaded]);
 
   useEffect(() => {
     if (!files.length) {
+      filesRef.current = files;
       setData((prev) => prev.files.length ? parseCollection(prev.files, useCaseCatalog) : empty);
       return;
     }
     const parsed = parseCollection(files, useCaseCatalog);
+    filesRef.current = files;
     setData(parsed);
     rememberGraphCollection(parsed);
   }, [files, useCaseCatalog]);
+
+  useEffect(() => {
+    void refreshManagerFiles();
+    const interval = window.setInterval(() => {
+      void refreshManagerFiles();
+    }, MANAGER_REFRESH_INTERVAL_MS);
+    return () => window.clearInterval(interval);
+  }, [refreshManagerFiles]);
 
   const handleCreateUseCase = async (useCase: UseCaseRecord) => {
     const response = await fetch('/api/use-cases', {
@@ -1864,7 +1963,14 @@ export default function WazuhRulesHub({ currentUser, initialCustomUseCases = [] 
 
   return (
     <div className="app-theme-unify app-surface-stack">
-      <RulesHubTopBar data={data} hasData={hasData} busy={busy} onLoadFiles={handleFileList} />
+      <RulesHubTopBar
+        data={data}
+        hasData={hasData}
+        busy={busy}
+        managerStatus={managerStatus}
+        onRefreshManager={() => { void refreshManagerFiles(); }}
+        onLoadFiles={handleFileList}
+      />
 
       <div className="app-workspace-shell">
         <aside className="app-sidebar">
@@ -1900,7 +2006,7 @@ export default function WazuhRulesHub({ currentUser, initialCustomUseCases = [] 
           {view === 'upload' && (
             <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(320px,420px)_1fr]">
               <UploadCard onLoaded={handleFilesLoaded} files={files} />
-              {!hasData ? <EmptyGraphWorkbench onLoadFiles={handleFileList} busy={busy} /> : <DependencyGraph data={data} useCases={useCaseCatalog} onSelect={setSelected} />}
+              {!hasData ? <EmptyGraphWorkbench onLoadFiles={handleFileList} onRefreshManager={() => { void refreshManagerFiles(); }} busy={busy} /> : <DependencyGraph data={data} useCases={useCaseCatalog} onSelect={setSelected} />}
             </div>
           )}
           {view === 'useCaseStudio' && <UseCaseStudio useCases={useCaseCatalog} currentUser={currentUser} onCreate={handleCreateUseCase} onDelete={handleDeleteUseCase} />}
