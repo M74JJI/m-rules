@@ -47,15 +47,15 @@ export default async function SignInPage({ searchParams }: Props) {
           </div>
 
           <div className="signin-product-copy">
-            <span className="signin-kicker">Detection engineering workspace</span>
-            <h1>Wazuh rules and decoder intelligence.</h1>
-            <p>Review rules, decoder lineage, client coverage, and validation findings.</p>
+            <span className="signin-kicker">Rules Hub</span>
+            <h1>Detection operations in one workspace.</h1>
+            <p>Review detections, source lineage, coverage, and quality across every client.</p>
           </div>
 
           <div className="signin-capabilities" aria-label="Platform capabilities">
-            <div><ShieldCheck /><span><strong>Keycloak SSO</strong><small>Role-based workspace access</small></span></div>
-            <div><Database /><span><strong>Manager archives</strong><small>Rules and decoders from configured sources</small></span></div>
-            <div><Network /><span><strong>Client scope</strong><small>Tenant filters across analysis and coverage</small></span></div>
+            <div><ShieldCheck /><span><strong>Rules and decoders</strong><small>Review detections and source lineage</small></span></div>
+            <div><Database /><span><strong>Coverage and quality</strong><small>Find gaps, dependencies, and validation issues</small></span></div>
+            <div><Network /><span><strong>Client workspaces</strong><small>Move between client views without losing context</small></span></div>
           </div>
 
           <p className="signin-product-foot">Mercure SOC · Internal platform</p>
@@ -64,20 +64,20 @@ export default async function SignInPage({ searchParams }: Props) {
         <div className="signin-login-panel">
           <div className="signin-theme-control"><ThemeSwitcher /></div>
           <div className="signin-login-content">
-            <span className="signin-kicker">Secure access</span>
-            <h2 id="signin-title">Sign in to Rules Hub</h2>
-            <p>Continue through Mercure SSO. Access follows assigned application role.</p>
+            <span className="signin-kicker">Welcome back</span>
+            <h2 id="signin-title">Sign in to Mercure</h2>
+            <p>Continue to Rules Hub with your Mercure account.</p>
 
             {configured ? (
               <form action={login} className="signin-form">
                 <AuthActionButton type="submit" className="signin-submit">
-                  Continue with Mercure
+                  Sign in
                   <ArrowRight />
                 </AuthActionButton>
               </form>
             ) : (
               <AlertPanel className="signin-config-alert">
-                SSO is not configured yet. Set required AUTH_* and AUTH_KEYCLOAK_* environment variables before exposing this app.
+                Sign-in is unavailable. Contact your platform administrator.
               </AlertPanel>
             )}
 

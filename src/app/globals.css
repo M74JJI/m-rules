@@ -1959,7 +1959,7 @@ body {
 /* Sign-in product shell */
 .signin-screen {
   min-height: 100dvh;
-  padding: clamp(1rem, 3vw, 2.5rem);
+  padding: 0;
   background:
     radial-gradient(circle at 78% 12%, color-mix(in oklch, var(--primary) 10%, transparent), transparent 28%),
     linear-gradient(145deg, var(--bg), color-mix(in oklch, var(--accent-soft) 48%, var(--bg)));
@@ -1971,14 +1971,14 @@ body {
 
 .signin-shell {
   display: grid;
-  width: min(100%, 1120px);
-  min-height: min(720px, calc(100dvh - 2rem));
-  grid-template-columns: minmax(0, 1.08fr) minmax(420px, 0.92fr);
+  width: 100%;
+  min-height: 100dvh;
+  grid-template-columns: minmax(0, 1.12fr) minmax(440px, 0.88fr);
   overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 28px;
+  border: 0;
+  border-radius: 0;
   background: var(--panel);
-  box-shadow: 0 28px 80px rgba(42, 37, 91, 0.15);
+  box-shadow: none;
 }
 
 .signin-product-panel {
@@ -1990,7 +1990,7 @@ body {
   overflow: hidden;
   background: oklch(0.23 0.085 274);
   color: white;
-  padding: clamp(2rem, 4vw, 3.5rem);
+  padding: clamp(2.5rem, 5vw, 5.5rem);
 }
 
 .signin-product-panel::before,
@@ -2057,7 +2057,7 @@ body {
 }
 
 .signin-product-copy {
-  max-width: 570px;
+  max-width: 680px;
   margin: auto 0 2.5rem;
 }
 
@@ -2077,7 +2077,7 @@ body {
 .signin-product-copy h1 {
   margin: 0.8rem 0 1rem;
   color: white;
-  font-size: clamp(2.35rem, 4.6vw, 4.25rem);
+  font-size: clamp(2.5rem, 5vw, 5rem);
   font-weight: 760;
   letter-spacing: -0.055em;
   line-height: 0.98;
@@ -2140,7 +2140,7 @@ body {
   min-width: 0;
   flex-direction: column;
   background: var(--panel);
-  padding: clamp(1.5rem, 3vw, 2.5rem);
+  padding: clamp(2rem, 4vw, 4rem);
 }
 
 .signin-theme-control {
@@ -2204,7 +2204,7 @@ body {
 }
 
 .dark .signin-shell {
-  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.34);
+  box-shadow: none;
 }
 
 .dark .signin-product-panel {
