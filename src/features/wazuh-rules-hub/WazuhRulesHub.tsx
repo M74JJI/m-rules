@@ -23,6 +23,7 @@ import {
   Sparkles,
   TableProperties,
   Tags,
+  UploadCloud,
   type LucideIcon,
 } from 'lucide-react';
 import { Badge, Button, FieldLabel, Input, SectionHeader, Select, SubtleCard, SurfaceCard, Textarea } from '@/components/ui/primitives';
@@ -370,14 +371,17 @@ function UploadCard({ onLoaded, files }: { onLoaded: (files: UploadedFile[]) => 
         description="Add one or more Wazuh rule or decoder files for review."
       />
       <div
-        className="border border-dashed border-[var(--border)] rounded-xl bg-[var(--panel-2)]/50 p-8 text-center hover:border-[var(--accent)] transition-colors cursor-pointer"
+        className="group flex min-h-28 cursor-pointer items-center gap-4 rounded-lg border border-dashed border-[var(--border-strong)] bg-[var(--panel-2)] px-5 py-4 text-left transition-colors hover:border-[var(--primary)] hover:bg-[var(--accent-soft)]"
         onClick={() => inputRef.current?.click()}
         onDragOver={(e) => { e.preventDefault(); }}
         onDrop={(e) => { e.preventDefault(); void load(e.dataTransfer.files); }}
       >
-        <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl border border-[var(--border)] bg-[var(--panel)] text-xs font-bold uppercase tracking-[0.18em] text-[var(--accent)]">XML</div>
-        <div className="text-sm text-[var(--text)] font-semibold">{busy ? 'Parsing files...' : 'Choose XML files'}</div>
-        <div className="text-xs text-[var(--text-soft)] mt-1">.xml, .html, .txt accepted</div>
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--panel)] text-[var(--primary)]"><UploadCloud className="size-4" /></div>
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-semibold text-[var(--text)]">{busy ? 'Parsing files...' : 'Drop files here or browse'}</div>
+          <div className="mt-1 text-xs text-[var(--text-soft)]">Wazuh XML, HTML, or TXT · multiple files supported</div>
+        </div>
+        <span className="hidden rounded-md border border-[var(--border)] bg-[var(--panel)] px-2.5 py-1.5 text-xs font-medium text-[var(--text)] sm:inline">Browse</span>
         <input
           ref={inputRef}
           type="file" multiple accept=".xml,.html,.txt"
@@ -447,13 +451,13 @@ function RulesHubTopBar({
       <div className="workspace-overview-main flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
         <div className="workspace-overview-copy max-w-4xl space-y-3">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--text)]">Workspace Overview</span>
+            <span className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--text-soft)]">Workspace overview</span>
             <Badge className="text-xs" tone="muted">{hasData ? `${fmt(data.files.length)} files` : 'Ready for import'}</Badge>
             {hasData ? <Badge className="text-xs" tone="muted">{selectedTenant === ALL_TENANTS ? 'All clients deduped' : `Client ${selectedTenant}`}</Badge> : null}
           </div>
           <h1 className="max-w-3xl text-2xl font-bold tracking-[-0.035em] text-[var(--text)] md:text-[2rem]">Detection operations</h1>
           <p className="max-w-3xl text-sm leading-6 text-[var(--text)]/80 md:text-[15px]">
-            Review rules, decoders, validation, graphs, and the use case catalog in one clean workspace.
+            Operational view of Wazuh rules, decoder coverage, validation findings, and client scope.
           </p>
         </div>
         <SubtleCard className="workspace-source-panel min-w-0 flex flex-col gap-4 p-4 xl:min-w-[340px]">
@@ -492,7 +496,7 @@ function RulesHubTopBar({
             }}
           />
           {hasData ? (
-            <div className="max-h-20 space-y-1 overflow-y-auto pr-1 text-xs text-[var(--text)]/75 custom-scrollbar">
+            <div className="hidden">
               {data.files.slice(0, 4).map((file) => (
                 <div key={file.hash} className="flex items-center justify-between gap-2 rounded-md border border-[var(--border)] bg-[var(--panel)] px-2 py-1">
                   <span className="truncate text-[var(--text)]" title={file.name}>{file.name}</span>
@@ -502,7 +506,7 @@ function RulesHubTopBar({
               {data.files.length > 4 ? <div className="text-[10px] uppercase tracking-widest">+{data.files.length - 4} more files</div> : null}
             </div>
           ) : (
-            <div className="rounded-md border border-dashed border-[var(--border)] bg-[var(--panel)] px-3 py-2 text-xs text-[var(--text)]/75">
+            <div className="hidden">
               Refresh the configured archive folder to activate graph modes, validation, MITRE, fields, and rule intelligence.
             </div>
           )}
@@ -594,10 +598,10 @@ function EmptyGraphWorkbench({ onLoadFiles, onRefreshManager, busy }: { onLoadFi
       </div>
       <div className="relative mt-3 flex flex-1 min-h-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-[var(--graph-stage-bg)]">
         <div className="absolute inset-0 rules-graph-grid opacity-70" />
-        <div className="relative max-w-xl px-6 text-center">
-          <div className="text-xs font-black uppercase tracking-[0.2em] text-[var(--accent)]">Graph Ready</div>
-          <h2 className="mt-2 text-2xl font-black text-[var(--text)]">Refresh manager archives to build the dependency map</h2>
-          <p className="mt-2 text-sm leading-6 text-[var(--text-soft)]">
+        <div className="relative max-w-lg px-6 text-center">
+          <GitBranch className="mx-auto size-5 text-[var(--primary)]" />
+          <h2 className="mt-3 text-lg font-semibold tracking-tight text-[var(--text)]">No dependency map yet</h2>
+          <p className="mt-1.5 text-sm leading-6 text-[var(--text-soft)]">
             The server reads every configured manager archive and loads rules plus decoders automatically.
           </p>
         </div>
@@ -622,18 +626,18 @@ function CommandCenter({ data }: { data: ParsedCollection }) {
           <div className="space-y-2">
             <div className="text-xs font-semibold text-[var(--text-soft)] uppercase mb-1">Status Distribution</div>
             {statusBreakdown.map(([k, v]) => (
-              <div key={k} className="flex items-center justify-between text-sm">
-                <span className="text-[var(--text)]">{k}</span>
-                <span className="text-[var(--text-soft)]">{v} rules</span>
+              <div key={k} className="distribution-row">
+                <div><span>{k}</span><strong>{fmt(v)}</strong></div>
+                <div className="distribution-track"><span style={{ width: `${data.rules.length ? (v / data.rules.length) * 100 : 0}%` }} /></div>
               </div>
             ))}
           </div>
           <div className="space-y-2 mt-4">
             <div className="text-xs font-semibold text-[var(--text-soft)] uppercase mb-1">Role Distribution</div>
             {roleBreakdown.map(([k, v]) => (
-              <div key={k} className="flex items-center justify-between text-sm">
-                <span className="text-[var(--text)]">{k}</span>
-                <span className="text-[var(--text-soft)]">{v} rules</span>
+              <div key={k} className="distribution-row">
+                <div><span>{k}</span><strong>{fmt(v)}</strong></div>
+                <div className="distribution-track"><span style={{ width: `${data.rules.length ? (v / data.rules.length) * 100 : 0}%` }} /></div>
               </div>
             ))}
           </div>
@@ -2426,10 +2430,12 @@ export default function WazuhRulesHub({ currentUser, initialCustomUseCases = [] 
             onLoadFiles={handleFileList}
           /> : null}
           {view !== 'command' ? <div className="app-view-heading">
-            <div>
-              <span>{activeView.group}</span>
-              <h2>{activeView.label}</h2>
-              <p>{activeView.desc}</p>
+            <div className="app-view-title">
+              <span className="app-view-title-icon"><activeView.icon /></span>
+              <div>
+                <span>{activeView.group}</span>
+                <h2>{activeView.label}</h2>
+              </div>
             </div>
             <div className="app-view-actions">
               {hasData ? (

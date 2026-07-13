@@ -67,8 +67,8 @@ export default function SocRouteShell({ children, user, role }: Props) {
               </Badge>
             )}
             <div className="rules-user-pill" title={user?.email ?? undefined}>
-              <Avatar className="rules-avatar bg-gradient-to-br from-primary/80 to-accent/80 text-primary-foreground after:hidden">
-                <AvatarFallback className="bg-transparent text-[0.72rem] font-black text-white">
+              <Avatar className="rules-avatar bg-primary text-primary-foreground after:hidden">
+                <AvatarFallback className="bg-transparent text-[0.72rem] font-semibold text-primary-foreground">
                   {initials(user)}
                 </AvatarFallback>
               </Avatar>

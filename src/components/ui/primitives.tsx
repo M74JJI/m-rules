@@ -70,9 +70,9 @@ export function Badge({
     <ShadBadge
       variant={badgeTone[tone]}
       className={cn(
-        tone === "info" && "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300",
+        tone === "info" && "border-primary/25 bg-primary/10 text-primary",
         tone === "success" && "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
-        tone === "warning" && "border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-300",
+        tone === "warning" && "border-[color:var(--warning)]/25 bg-[color:var(--warning)]/10 text-[color:var(--warning)]",
         tone === "muted" && "border-border/60 bg-muted/60 text-muted-foreground",
         className
       )}
@@ -198,9 +198,9 @@ export function AlertPanel({
     <Alert
       variant={tone === "danger" ? "destructive" : "default"}
       className={cn(
-        tone === "info" && "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-200",
+        tone === "info" && "border-primary/25 bg-primary/10 text-primary",
         tone === "success" && "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200",
-        tone === "warning" && "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-200",
+        tone === "warning" && "border-[color:var(--warning)]/25 bg-[color:var(--warning)]/10 text-[color:var(--warning)]",
         tone === "muted" && "border-border/60 bg-muted/50 text-muted-foreground",
         className
       )}
