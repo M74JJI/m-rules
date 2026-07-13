@@ -280,6 +280,7 @@ const downloadText = (fileName: string, content: string, type = 'text/plain') =>
 
 // ---- KPI Card ----
 function KPI({ label, value, sub, tone }: { label: string; value: number | string; sub: string; tone?: string }) {
+  const Icon = tone === 'red' ? ClipboardCheck : tone === 'amber' ? Activity : tone === 'green' ? ShieldCheck : ChartNoAxesCombined;
   const toneClass =
     tone === 'red'
       ? 'border-red-500/25 bg-red-500/10'
@@ -290,9 +291,12 @@ function KPI({ label, value, sub, tone }: { label: string; value: number | strin
           : 'border-sky-500/20 bg-sky-500/10';
   return (
     <SubtleCard className={cx('dashboard-kpi p-4', toneClass)} data-tone={tone || 'cyan'}>
-      <div className="dashboard-kpi-label">{label}</div>
-      <div className="dashboard-kpi-value">{typeof value === 'number' ? fmt(value) : value}</div>
-      <div className="dashboard-kpi-sub">{sub}</div>
+      <span className="dashboard-kpi-icon"><Icon /></span>
+      <div className="dashboard-kpi-copy">
+        <div className="dashboard-kpi-value">{typeof value === 'number' ? fmt(value) : value}</div>
+        <div className="dashboard-kpi-label">{label}</div>
+        <div className="dashboard-kpi-sub">{sub}</div>
+      </div>
     </SubtleCard>
   );
 }
