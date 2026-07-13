@@ -5,6 +5,7 @@ import { Badge, Button, FieldLabel, Input, SectionHeader, Select, SubtleCard, Su
 import { cx } from '@/lib/cx';
 import type { DecoderRecord, ParsedCollection, RuleRecord, UploadedFile, UseCaseRecord, ValidationIssue } from './lib/types';
 import { parseCollection, readUploadedFiles } from './lib/parser';
+import { ALL_TENANTS, getRecordTenant } from './lib/tenants';
 import { buildUseCaseId, getUseCaseById, getUseCaseLabel, mergeUseCases, USE_CASE_COMPONENTS } from './lib/use-cases';
 import { buildDecoderIntelligence, type FieldMatrixRow } from './lib/field-matrix';
 import { buildGraphData, layoutGraph, type GraphEdge, type GraphFilters, type GraphLayout, type GraphMode, type PositionedNode } from './lib/graph-engine';
@@ -49,6 +50,127 @@ const empty: ParsedCollection = {
 
 const fmt = (n: number) => new Intl.NumberFormat().format(n);
 const ucName = (catalog: UseCaseRecord[], id: string) => getUseCaseLabel(catalog, id);
+const tenantLabel = (tenant: string) => tenant === ALL_TENANTS ? 'All clients' : tenant;
+
+const stableTextHash = (text: string) => {
+  let hash = 2166136261;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+};
+
+const dedupeBy = <T,>(items: T[], keyFor: (item: T) => string) => {
+  const seen = new Map<string, T>();
+  for (const item of items) {
+    const key = keyFor(item);
+    if (!seen.has(key)) seen.set(key, item);
+  }
+  return [...seen.values()];
+};
+
+const buildCollectionFromParts = (
+  source: ParsedCollection,
+  files: UploadedFile[],
+  rules: RuleRecord[],
+  decoders: DecoderRecord[],
+  issues: ValidationIssue[],
+  useCaseCatalog: UseCaseRecord[],
+): ParsedCollection => {
+  const usedUseCases = new Set(rules.map((rule) => rule.useCaseId).filter((id) => id && id !== 'unassigned'));
+  const activeUseCases = useCaseCatalog.filter((useCase) => usedUseCases.has(useCase.id));
+  const brokenDependencies = issues.filter((issue) => ['external_or_missing_sid', 'missing_group_dependency', 'missing_decoder'].includes(issue.type)).length;
+  return {
+    ...source,
+    files,
+    rules,
+    decoders,
+    useCases: activeUseCases,
+    issues,
+    stats: {
+      rules: rules.length,
+      decoders: decoders.length,
+      useCases: usedUseCases.size,
+      jiraVisible: rules.filter((rule) => rule.jiraVisible).length,
+      testing: rules.filter((rule) => rule.status === 'testing').length,
+      production: rules.filter((rule) => rule.status === 'production').length,
+      critical: rules.filter((rule) => rule.severity === 'critical').length,
+      mitreMapped: rules.filter((rule) => rule.mitre.length > 0).length,
+      missingUseCase: rules.filter((rule) => rule.useCaseId === 'unassigned').length,
+      brokenDependencies,
+    },
+  };
+};
+
+const buildScopedIssues = (files: UploadedFile[], rules: RuleRecord[], decoders: DecoderRecord[], useCaseCatalog: UseCaseRecord[]) => {
+  const issues: ValidationIssue[] = [];
+  const knownUseCases = new Set(useCaseCatalog.map((useCase) => useCase.id));
+  const ruleGroups = new Map<string, RuleRecord[]>();
+  const decoderGroups = new Map<string, DecoderRecord[]>();
+  const groupsProduced = new Set<string>();
+  const ruleIds = new Set(rules.map((rule) => rule.id));
+  const decoderNames = new Set(decoders.map((decoder) => decoder.name));
+
+  rules.forEach((rule) => {
+    ruleGroups.set(rule.id, [...(ruleGroups.get(rule.id) || []), rule]);
+    rule.groups.forEach((group) => groupsProduced.add(group));
+  });
+  decoders.forEach((decoder) => decoderGroups.set(decoder.name, [...(decoderGroups.get(decoder.name) || []), decoder]));
+
+  for (const [id, scopedRules] of ruleGroups) {
+    if (scopedRules.length > 1) issues.push({ severity: 'error', type: 'duplicate_rule_id', title: `Duplicate rule ID ${id}`, detail: `${scopedRules.length} rules share the same Wazuh rule ID in this client scope.`, ruleId: id, tenant: scopedRules[0]?.tenant });
+  }
+  for (const [name, scopedDecoders] of decoderGroups) {
+    if (scopedDecoders.length > 1) issues.push({ severity: 'warning', type: 'duplicate_decoder_name', title: `Duplicate decoder ${name}`, detail: `${scopedDecoders.length} decoder blocks share the same decoder name in this client scope.`, decoderName: name, tenant: scopedDecoders[0]?.tenant });
+  }
+
+  for (const rule of rules) {
+    if (rule.useCaseId === 'unassigned') issues.push({ severity: 'warning', type: 'missing_use_case', title: `Rule ${rule.id} has no use case`, detail: 'Add <info type="text">use_case:...</info> or extend fallback mappings.', ruleId: rule.id, fileName: rule.sourceFile, tenant: rule.tenant });
+    if (rule.useCaseId !== 'unassigned' && !knownUseCases.has(rule.useCaseId)) issues.push({ severity: 'warning', type: 'unknown_use_case_registry', title: `Rule ${rule.id} uses unknown use case ${rule.useCaseId}`, detail: 'The use_case info tag resolves to an ID that is not registered in the use-case catalog.', ruleId: rule.id, fileName: rule.sourceFile, tenant: rule.tenant });
+    if (rule.jiraVisible && rule.mitre.length === 0) issues.push({ severity: 'warning', type: 'jira_without_mitre', title: `Jira-visible rule ${rule.id} has no MITRE`, detail: 'Level >= 11 but no MITRE technique was found.', ruleId: rule.id, tenant: rule.tenant });
+    if (rule.level === 0 && rule.mitre.length > 0) issues.push({ severity: 'info', type: 'helper_with_mitre', title: `Helper rule ${rule.id} has MITRE`, detail: 'Level 0 helper rules usually should not carry ATT&CK mapping unless intentional.', ruleId: rule.id, tenant: rule.tenant });
+    if (rule.level > 15) issues.push({ severity: 'warning', type: 'level_above_standard', title: `Rule ${rule.id} level is above 15`, detail: `Detected level ${rule.level}. Confirm this is accepted by your Wazuh version and workflow.`, ruleId: rule.id, tenant: rule.tenant });
+    for (const dependency of rule.dependencies) {
+      if ((dependency.type === 'if_sid' || dependency.type === 'if_matched_sid') && !ruleIds.has(dependency.value)) issues.push({ severity: 'warning', type: 'external_or_missing_sid', title: `Rule ${rule.id} references SID ${dependency.value}`, detail: 'The SID was not found in this client scope. It may be stock Wazuh, external, or missing.', ruleId: rule.id, tenant: rule.tenant });
+      if ((dependency.type === 'if_group' || dependency.type === 'if_matched_group') && !groupsProduced.has(dependency.value)) issues.push({ severity: 'warning', type: 'missing_group_dependency', title: `Rule ${rule.id} references group ${dependency.value}`, detail: 'No rule in this client scope produces this group. It may be external, missing, or typo.', ruleId: rule.id, tenant: rule.tenant });
+      if (dependency.type === 'decoded_as' && !decoderNames.has(dependency.value)) issues.push({ severity: 'warning', type: 'missing_decoder', title: `Rule ${rule.id} uses decoder ${dependency.value}`, detail: 'No decoder block in this client scope has this exact decoder name.', ruleId: rule.id, tenant: rule.tenant });
+    }
+  }
+
+  for (const decoder of decoders) {
+    if (decoder.parent && !decoderNames.has(decoder.parent)) issues.push({ severity: 'info', type: 'external_decoder_parent', title: `Decoder ${decoder.name} parent not uploaded`, detail: `Parent decoder ${decoder.parent} was not found in this client scope. It may be stock/built-in or in another file.`, decoderName: decoder.name, tenant: decoder.tenant });
+  }
+  for (const file of files) {
+    if (file.type === 'unknown') issues.push({ severity: 'info', type: 'unknown_file_type', title: `Unknown file type: ${file.name}`, detail: 'The file did not clearly look like rules or decoders XML.', fileName: file.name, tenant: getRecordTenant(file) });
+  }
+
+  return issues;
+};
+
+const buildTenantScopedCollection = (source: ParsedCollection, selectedTenant: string, useCaseCatalog: UseCaseRecord[]) => {
+  if (selectedTenant !== ALL_TENANTS) {
+    const byTenant = (item: { tenant?: string; sourceFile?: string; name?: string; fileName?: string }) => getRecordTenant(item) === selectedTenant;
+    const files = source.files.filter(byTenant);
+    const rules = source.rules.filter(byTenant);
+    const decoders = source.decoders.filter(byTenant);
+    return buildCollectionFromParts(
+      source,
+      files,
+      rules,
+      decoders,
+      buildScopedIssues(files, rules, decoders, useCaseCatalog),
+      useCaseCatalog,
+    );
+  }
+
+  const rules = dedupeBy(source.rules, (rule) => `${rule.id}:${stableTextHash(rule.rawXml || rule.description)}`);
+  const decoders = dedupeBy(source.decoders, (decoder) => `${decoder.name}:${stableTextHash(decoder.rawXml)}`);
+  const files = dedupeBy(source.files, (file) => `${file.type}:${stableTextHash(file.content)}`);
+  const issues = dedupeBy(buildScopedIssues(files, rules, decoders, useCaseCatalog), (issue) => `${issue.severity}:${issue.type}:${issue.ruleId || ''}:${issue.decoderName || ''}:${issue.title}:${issue.detail}`);
+
+  return buildCollectionFromParts(source, files, rules, decoders, issues, useCaseCatalog);
+};
 
 const GRAPH_COLLECTION_KEY = 'wri.graphCollection.v1';
 const MANAGER_REFRESH_INTERVAL_MS = 60 * 60 * 1000;
@@ -259,16 +381,24 @@ function UploadCard({ onLoaded, files }: { onLoaded: (files: UploadedFile[]) => 
 
 function RulesHubTopBar({
   data,
+  rawData,
   hasData,
   busy,
   managerStatus,
+  tenants,
+  selectedTenant,
+  onTenantChange,
   onRefreshManager,
   onLoadFiles,
 }: {
   data: ParsedCollection;
+  rawData: ParsedCollection;
   hasData: boolean;
   busy: boolean;
   managerStatus: ManagerArchiveStatus;
+  tenants: string[];
+  selectedTenant: string;
+  onTenantChange: (tenant: string) => void;
   onRefreshManager: () => void;
   onLoadFiles: (files: FileList | null) => void;
 }) {
@@ -295,6 +425,7 @@ function RulesHubTopBar({
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--text)]">Workspace Overview</span>
             <Badge className="text-xs" tone="muted">{hasData ? `${fmt(data.files.length)} files` : 'Ready for import'}</Badge>
+            {hasData ? <Badge className="text-xs" tone="muted">{selectedTenant === ALL_TENANTS ? 'All clients deduped' : `Client ${selectedTenant}`}</Badge> : null}
           </div>
           <h1 className="max-w-3xl text-[2rem] font-black tracking-[-0.05em] text-[var(--text)] md:text-[2.75rem]">Rule analysis and use case operations</h1>
           <p className="max-w-3xl text-sm leading-6 text-[var(--text)]/80 md:text-[15px]">
@@ -302,6 +433,18 @@ function RulesHubTopBar({
           </p>
         </div>
         <SubtleCard className="min-w-0 flex flex-col gap-4 p-4 xl:min-w-[340px]">
+          {hasData ? (
+            <div className="space-y-1.5">
+              <FieldLabel>Client scope</FieldLabel>
+              <Select className="h-9 text-xs font-semibold" value={selectedTenant} onChange={(event) => onTenantChange(event.target.value)}>
+                <option value={ALL_TENANTS}>All clients (deduped)</option>
+                {tenants.map((tenant) => <option key={tenant} value={tenant}>{tenantLabel(tenant)}</option>)}
+              </Select>
+              <div className="text-[11px] text-[var(--text-soft)]">
+                Showing {fmt(data.rules.length)} of {fmt(rawData.rules.length)} rules.
+              </div>
+            </div>
+          ) : null}
           <div className="flex items-center justify-between gap-3">
             <div>
               <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--text)]">Manager archives</div>
@@ -329,7 +472,7 @@ function RulesHubTopBar({
               {data.files.slice(0, 4).map((file) => (
                 <div key={file.hash} className="flex items-center justify-between gap-2 rounded-md border border-[var(--border)] bg-[var(--panel)] px-2 py-1">
                   <span className="truncate text-[var(--text)]" title={file.name}>{file.name}</span>
-                  <span className="shrink-0">{file.type}</span>
+                  <span className="shrink-0">{getRecordTenant(file)} · {file.type}</span>
                 </div>
               ))}
               {data.files.length > 4 ? <div className="text-[10px] uppercase tracking-widest">+{data.files.length - 4} more files</div> : null}
@@ -529,10 +672,11 @@ function RuleExplorer({ data, onSelect }: { data: ParsedCollection; onSelect: (s
       <PageControls total={rows.length} page={paged.page} totalPages={paged.totalPages} start={paged.start} end={paged.end} setPage={paged.setPage} />
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
-          <thead><tr className="border-b border-[var(--border)] text-left text-xs text-[var(--text-soft)] uppercase tracking-wider"><th className="p-2">ID</th><th className="p-2">Lvl</th><th className="p-2">Role</th><th className="p-2">Status</th><th className="p-2">Use Case</th><th className="p-2">Description</th><th className="p-2">MITRE</th><th className="p-2">Groups</th></tr></thead>
+          <thead><tr className="border-b border-[var(--border)] text-left text-xs text-[var(--text-soft)] uppercase tracking-wider"><th className="p-2">Client</th><th className="p-2">ID</th><th className="p-2">Lvl</th><th className="p-2">Role</th><th className="p-2">Status</th><th className="p-2">Use Case</th><th className="p-2">Description</th><th className="p-2">MITRE</th><th className="p-2">Groups</th></tr></thead>
           <tbody>
             {paged.pageRows.map(r => (
               <tr key={`${r.sourceFile}-${r.id}`} onClick={() => onSelect({ type: 'rule', item: r })} className="border-b border-[var(--border)] hover:bg-[var(--accent-soft)] cursor-pointer transition-colors">
+                <td className="p-2"><Chip>{getRecordTenant(r)}</Chip></td>
                 <td className="p-2"><span className="rounded-md bg-[var(--accent-soft)] px-2 py-0.5 text-xs font-mono font-bold text-[var(--accent)]">{r.id}</span></td>
                 <td className="p-2"><span className={cx('font-semibold', levelTextClass(r.severity))}>{r.level}</span></td>
                 <td className="p-2 text-[var(--text)]">{r.role}</td>
@@ -569,10 +713,11 @@ function DecoderExplorer({ data, onSelect }: { data: ParsedCollection; onSelect:
       <PageControls total={rows.length} page={paged.page} totalPages={paged.totalPages} start={paged.start} end={paged.end} setPage={paged.setPage} />
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
-          <thead><tr className="border-b border-[var(--border)] text-left text-xs text-[var(--text-soft)] uppercase tracking-wider"><th className="p-2">Decoder</th><th className="p-2">Parent</th><th className="p-2">Order Fields</th><th className="p-2">Regex</th><th className="p-2">Source</th></tr></thead>
+          <thead><tr className="border-b border-[var(--border)] text-left text-xs text-[var(--text-soft)] uppercase tracking-wider"><th className="p-2">Client</th><th className="p-2">Decoder</th><th className="p-2">Parent</th><th className="p-2">Order Fields</th><th className="p-2">Regex</th><th className="p-2">Source</th></tr></thead>
           <tbody>
             {paged.pageRows.map((d, i) => (
               <tr key={`${d.name}-${i}`} onClick={() => onSelect({ type: 'decoder', item: d })} className="border-b border-[var(--border)] hover:bg-[var(--accent-soft)] cursor-pointer transition-colors">
+                <td className="p-2"><Chip>{getRecordTenant(d)}</Chip></td>
                 <td className="p-2"><span className={decoderChipClass}>{d.name}</span></td>
                 <td className="p-2 text-[var(--text)]">{d.parent || 'none'}</td>
                 <td className="p-2"><div className="flex flex-wrap gap-1">{d.orderFields.slice(0, 8).map(f => <Chip key={f}>{f}</Chip>)}</div></td>
@@ -1221,6 +1366,7 @@ function FilesView({ data }: { data: ParsedCollection }) {
               <span className="font-semibold text-[var(--text)]">{f.name}</span>
               <span className="text-xs text-[var(--text-soft)]">{f.type} · {(f.size / 1024).toFixed(1)} KB</span>
             </div>
+            <div className="mt-2"><Chip>{getRecordTenant(f)}</Chip></div>
             <div className="text-xs text-[var(--text-soft)] mt-1 font-mono">sha256 {f.hash.slice(0, 24)}...</div>
             <div className="flex gap-2 mt-2">
               <Chip>{counts.rules.get(f.name) || 0} rules</Chip>
@@ -1274,6 +1420,7 @@ function Drawer({ selected, onClose }: { selected: Selected; onClose: () => void
                   <h3 className="text-sm font-semibold text-[var(--text)] mb-3">Rule Metadata</h3>
                   <div className="grid grid-cols-2 gap-2 text-sm">
                     <span className="text-[var(--text-soft)]">Level</span><span className="text-[var(--text)]">{selected.item.level} · {selected.item.severity}</span>
+                    <span className="text-[var(--text-soft)]">Client</span><span className="text-[var(--text)]">{getRecordTenant(selected.item)}</span>
                     <span className="text-[var(--text-soft)]">Role</span><span className="text-[var(--text)]">{selected.item.role}</span>
                     <span className="text-[var(--text-soft)]">Status</span><span className="text-[var(--text)]">{selected.item.status}</span>
                     <span className="text-[var(--text-soft)]">Use Case</span><span className="text-[var(--text)]">{selected.item.useCaseId} · {selected.item.useCaseConfidence}</span>
@@ -1334,6 +1481,7 @@ function Drawer({ selected, onClose }: { selected: Selected; onClose: () => void
                   <h3 className="text-sm font-semibold text-[var(--text)] mb-3">Decoder Metadata</h3>
                   <div className="grid grid-cols-2 gap-2 text-sm">
                     <span className="text-[var(--text-soft)]">Name</span><span className="text-[var(--text)]">{selected.item.name}</span>
+                    <span className="text-[var(--text-soft)]">Client</span><span className="text-[var(--text)]">{getRecordTenant(selected.item)}</span>
                     <span className="text-[var(--text-soft)]">Parent</span><span className="text-[var(--text)]">{selected.item.parent || 'none'}</span>
                     <span className="text-[var(--text-soft)]">Regex blocks</span><span className="text-[var(--text)]">{selected.item.regex.length}</span>
                     <span className="text-[var(--text-soft)]">Order fields</span><span className="text-[var(--text)]">{selected.item.orderFields.length}</span>
@@ -1376,6 +1524,7 @@ function Drawer({ selected, onClose }: { selected: Selected; onClose: () => void
               <div className="grid grid-cols-2 gap-2 text-sm">
                 <span className="text-[var(--text-soft)]">Severity</span><span className="text-[var(--text)]">{selected.item.severity}</span>
                 <span className="text-[var(--text-soft)]">Type</span><span className="text-[var(--text)]">{selected.item.type}</span>
+                <span className="text-[var(--text-soft)]">Client</span><span className="text-[var(--text)]">{getRecordTenant(selected.item)}</span>
                 <span className="text-[var(--text-soft)]">Rule</span><span className="text-[var(--text)]">{selected.item.ruleId || 'none'}</span>
                 <span className="text-[var(--text-soft)]">Decoder</span><span className="text-[var(--text)]">{selected.item.decoderName || 'none'}</span>
                 <span className="text-[var(--text-soft)]">File</span><span className="text-[var(--text)]">{selected.item.fileName || 'none'}</span>
@@ -1973,6 +2122,7 @@ export default function WazuhRulesHub({ currentUser, initialCustomUseCases = [] 
   const filesRef = useRef<UploadedFile[]>(restored.files);
   const [view, setView] = useState<ActiveView>(data.files.length ? 'graph' : 'upload');
   const [selected, setSelected] = useState<Selected>(null);
+  const [selectedTenant, setSelectedTenant] = useState(ALL_TENANTS);
   const [busy, setBusy] = useState(false);
   const [managerStatus, setManagerStatus] = useState<ManagerArchiveStatus>({
     rootPath: null,
@@ -2176,15 +2326,35 @@ export default function WazuhRulesHub({ currentUser, initialCustomUseCases = [] 
   };
 
   const hasData = data.files.length > 0;
+  const tenants = useMemo(() => (
+    [...new Set(data.files.map((file) => getRecordTenant(file)))]
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b))
+  ), [data.files]);
+  const displayData = useMemo(() => buildTenantScopedCollection(data, selectedTenant, useCaseCatalog), [data, selectedTenant, useCaseCatalog]);
   const canOpenView = (id: ActiveView) => hasData || ['upload', 'useCaseStudio'].includes(id);
+
+  useEffect(() => {
+    if (selectedTenant !== ALL_TENANTS && !tenants.includes(selectedTenant)) {
+      setSelectedTenant(ALL_TENANTS);
+    }
+  }, [selectedTenant, tenants]);
+
+  useEffect(() => {
+    setSelected(null);
+  }, [selectedTenant]);
 
   return (
     <div className="app-theme-unify app-surface-stack">
       <RulesHubTopBar
-        data={data}
+        data={displayData}
+        rawData={data}
         hasData={hasData}
         busy={busy}
         managerStatus={managerStatus}
+        tenants={tenants}
+        selectedTenant={selectedTenant}
+        onTenantChange={setSelectedTenant}
         onRefreshManager={() => { void refreshManagerFiles(); }}
         onLoadFiles={handleFileList}
       />
@@ -2223,27 +2393,27 @@ export default function WazuhRulesHub({ currentUser, initialCustomUseCases = [] 
           {view === 'upload' && (
             <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(320px,420px)_1fr]">
               <UploadCard onLoaded={handleFilesLoaded} files={files} />
-              {!hasData ? <EmptyGraphWorkbench onLoadFiles={handleFileList} onRefreshManager={() => { void refreshManagerFiles(); }} busy={busy} /> : <DependencyGraph data={data} useCases={useCaseCatalog} onSelect={setSelected} />}
+              {!hasData ? <EmptyGraphWorkbench onLoadFiles={handleFileList} onRefreshManager={() => { void refreshManagerFiles(); }} busy={busy} /> : <DependencyGraph data={displayData} useCases={useCaseCatalog} onSelect={setSelected} />}
             </div>
           )}
           {view === 'useCaseStudio' && <UseCaseStudio useCases={useCaseCatalog} currentUser={currentUser} onCreate={handleCreateUseCase} onDelete={handleDeleteUseCase} />}
-          {view === 'command' && hasData && <CommandCenter data={data} />}
-          {view === 'rules' && hasData && <RuleExplorer data={data} onSelect={setSelected} />}
-          {view === 'decoders' && hasData && <DecoderExplorer data={data} onSelect={setSelected} />}
-          {view === 'fields' && hasData && <FieldCoverageMatrix data={data} onSelect={setSelected} />}
-          {view === 'graph' && hasData && <DependencyGraph data={data} useCases={useCaseCatalog} onSelect={setSelected} />}
-          {view === 'mitre' && hasData && <MitreView data={data} onSelect={setSelected} />}
-          {view === 'validation' && hasData && <ValidationCenter data={data} />}
-          {view === 'files' && hasData && <FilesView data={data} />}
-          {view === 'templates' && hasData && <RuleTemplateLibraryCenter data={data} onSelect={setSelected} />}
-          {view === 'composer' && hasData && <RuleComposerCenter data={data} useCases={useCaseCatalog} />}
-          {view === 'usecases' && hasData && <UseCaseTree data={data} useCases={useCaseCatalog} onSelect={setSelected} />}
-          {view === 'coverage' && hasData && <CoverageMapView data={data} useCases={useCaseCatalog} />}
-          {view === 'quality' && hasData && <QualityScoresView data={data} onSelect={setSelected} />}
-          {view === 'fieldIntel' && hasData && <FieldIntelView data={data} />}
-          {view === 'search' && hasData && <SearchView data={data} onSelect={setSelected} />}
-          {view === 'ai' && hasData && <AiIntelView data={data} />}
-          {view === 'roundtrip' && hasData && <RoundtripView data={data} />}
+          {view === 'command' && hasData && <CommandCenter data={displayData} />}
+          {view === 'rules' && hasData && <RuleExplorer data={displayData} onSelect={setSelected} />}
+          {view === 'decoders' && hasData && <DecoderExplorer data={displayData} onSelect={setSelected} />}
+          {view === 'fields' && hasData && <FieldCoverageMatrix data={displayData} onSelect={setSelected} />}
+          {view === 'graph' && hasData && <DependencyGraph data={displayData} useCases={useCaseCatalog} onSelect={setSelected} />}
+          {view === 'mitre' && hasData && <MitreView data={displayData} onSelect={setSelected} />}
+          {view === 'validation' && hasData && <ValidationCenter data={displayData} />}
+          {view === 'files' && hasData && <FilesView data={displayData} />}
+          {view === 'templates' && hasData && <RuleTemplateLibraryCenter data={displayData} onSelect={setSelected} />}
+          {view === 'composer' && hasData && <RuleComposerCenter data={displayData} useCases={useCaseCatalog} />}
+          {view === 'usecases' && hasData && <UseCaseTree data={displayData} useCases={useCaseCatalog} onSelect={setSelected} />}
+          {view === 'coverage' && hasData && <CoverageMapView data={displayData} useCases={useCaseCatalog} />}
+          {view === 'quality' && hasData && <QualityScoresView data={displayData} onSelect={setSelected} />}
+          {view === 'fieldIntel' && hasData && <FieldIntelView data={displayData} />}
+          {view === 'search' && hasData && <SearchView data={displayData} onSelect={setSelected} />}
+          {view === 'ai' && hasData && <AiIntelView data={displayData} />}
+          {view === 'roundtrip' && hasData && <RoundtripView data={displayData} />}
 
           {!hasData && !['upload', 'useCaseStudio'].includes(view) && (
             <SurfaceCard className="p-8 text-center space-y-4">

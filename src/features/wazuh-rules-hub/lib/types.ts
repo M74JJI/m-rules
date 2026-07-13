@@ -1,5 +1,6 @@
 export type UploadedFile = {
   name: string;
+  tenant?: string;
   size: number;
   type: 'rules' | 'decoders' | 'unknown';
   content: string;
@@ -26,6 +27,7 @@ export type RuleRecord = {
   role: string;
   severity: string;
   jiraVisible: boolean;
+  tenant?: string;
   sourceFile: string;
   sourceSection?: string;
   useCaseId: string;
@@ -46,6 +48,7 @@ export type DecoderRecord = {
   prematch?: string[];
   regex: string[];
   orderFields: string[];
+  tenant?: string;
   sourceFile: string;
   rawXml: string;
 };
@@ -73,6 +76,7 @@ export type ValidationIssue = {
   ruleId?: string;
   decoderName?: string;
   fileName?: string;
+  tenant?: string;
 };
 
 export type ParsedCollection = {

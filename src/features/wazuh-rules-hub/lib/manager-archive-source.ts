@@ -3,6 +3,7 @@ import { mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { tenantFromArchiveName } from './tenants';
 import type { UploadedFile } from './types';
 
 export type ManagerArchiveSnapshot = {
@@ -116,10 +117,12 @@ const buildFingerprint = (archives: ManagerArchiveSnapshot['archives']) =>
 
 export async function readManagerArchiveFiles(archive: ManagerArchiveWorkItem): Promise<UploadedFile[]> {
   const extracted = await extractArchiveEntries(archive.path, archive.entries);
+  const tenant = tenantFromArchiveName(archive.name);
   return extracted.map(({ entry, content }) => {
     const sourceName = `${archive.name}/${entry}`;
     return {
       name: sourceName,
+      tenant,
       size: Buffer.byteLength(content, 'utf8'),
       type: inferFileType(sourceName, content),
       content,

@@ -1,4 +1,5 @@
 import { GROUP_TO_USE_CASE, USE_CASES } from './use-cases';
+import { MANUAL_TENANT, tenantFromSourceName } from './tenants';
 import type { DecoderRecord, ParsedCollection, RuleDependency, RuleField, RuleRecord, UploadedFile, UseCaseRecord, ValidationIssue } from './types';
 
 const decodeEntities = (value: string) =>
@@ -63,6 +64,7 @@ export const readUploadedFiles = async (fileList: FileList | File[]): Promise<Up
     const content = await file.text();
     results.push({
       name: file.name,
+      tenant: MANUAL_TENANT,
       size: file.size,
       content,
       type: inferFileType(file.name, content),
@@ -137,7 +139,7 @@ const sourceSectionFor = (content: string, index: number): string | undefined =>
   return last?.replace(/-->/g, '').trim();
 };
 
-const parseRuleBlock = (xml: string, fileName: string, content: string, startIndex: number): RuleRecord | null => {
+const parseRuleBlock = (xml: string, fileName: string, content: string, startIndex: number, tenant: string): RuleRecord | null => {
   const id = attr(xml, 'id');
   if (!id) return null;
   const level = Number(attr(xml, 'level') || 0);
@@ -170,6 +172,7 @@ const parseRuleBlock = (xml: string, fileName: string, content: string, startInd
     role: roleFromRule(level, xml, groups),
     severity: severityFromLevel(level),
     jiraVisible: level >= 11,
+    tenant,
     sourceFile: fileName,
     sourceSection: sourceSectionFor(content, startIndex),
     useCaseId: inferred.id,
@@ -188,15 +191,17 @@ const parseRuleBlock = (xml: string, fileName: string, content: string, startInd
 const parseRules = (file: UploadedFile): RuleRecord[] => {
   const rules: RuleRecord[] = [];
   const re = /<rule\b[\s\S]*?<\/rule>/gi;
+  const tenant = file.tenant || tenantFromSourceName(file.name);
   let m: RegExpExecArray | null;
   while ((m = re.exec(file.content))) {
-    const rule = parseRuleBlock(m[0], file.name, file.content, m.index);
+    const rule = parseRuleBlock(m[0], file.name, file.content, m.index, tenant);
     if (rule) rules.push(rule);
   }
   return rules;
 };
 
 const parseDecoders = (file: UploadedFile): DecoderRecord[] => {
+  const tenant = file.tenant || tenantFromSourceName(file.name);
   return getBlocks(file.content, 'decoder')
     .map((xml) => ({
       name: attr(xml, 'name') || tagValues(xml, 'name')[0] || 'unnamed_decoder',
@@ -204,6 +209,7 @@ const parseDecoders = (file: UploadedFile): DecoderRecord[] => {
       prematch: tagValues(xml, 'prematch'),
       regex: tagValues(xml, 'regex'),
       orderFields: tagValues(xml, 'order').flatMap(splitCsv),
+      tenant,
       sourceFile: file.name,
       rawXml: xml,
     }))
@@ -215,11 +221,11 @@ const validate = (files: UploadedFile[], rules: RuleRecord[], decoders: DecoderR
   const knownUseCases = new Set(useCases.map((useCase) => useCase.id));
   const idMap = new Map<string, RuleRecord[]>();
   for (const r of rules) idMap.set(r.id, [...(idMap.get(r.id) || []), r]);
-  for (const [id, rs] of idMap) if (rs.length > 1) issues.push({ severity: 'error', type: 'duplicate_rule_id', title: `Duplicate rule ID ${id}`, detail: `${rs.length} rules share the same Wazuh rule ID.`, ruleId: id });
+  for (const [id, rs] of idMap) if (rs.length > 1) issues.push({ severity: 'error', type: 'duplicate_rule_id', title: `Duplicate rule ID ${id}`, detail: `${rs.length} rules share the same Wazuh rule ID.`, ruleId: id, tenant: rs[0]?.tenant });
 
   const decoderMap = new Map<string, DecoderRecord[]>();
   for (const d of decoders) decoderMap.set(d.name, [...(decoderMap.get(d.name) || []), d]);
-  for (const [name, ds] of decoderMap) if (ds.length > 1) issues.push({ severity: 'warning', type: 'duplicate_decoder_name', title: `Duplicate decoder ${name}`, detail: `${ds.length} decoder blocks share the same decoder name.`, decoderName: name });
+  for (const [name, ds] of decoderMap) if (ds.length > 1) issues.push({ severity: 'warning', type: 'duplicate_decoder_name', title: `Duplicate decoder ${name}`, detail: `${ds.length} decoder blocks share the same decoder name.`, decoderName: name, tenant: ds[0]?.tenant });
 
   const groupsProduced = new Set<string>();
   rules.forEach((r) => r.groups.forEach((g) => groupsProduced.add(g)));
@@ -227,23 +233,23 @@ const validate = (files: UploadedFile[], rules: RuleRecord[], decoders: DecoderR
   const decoderNames = new Set(decoders.map((d) => d.name));
 
   for (const r of rules) {
-    if (r.useCaseId === 'unassigned') issues.push({ severity: 'warning', type: 'missing_use_case', title: `Rule ${r.id} has no use case`, detail: 'Add <info type="text">use_case:...</info> or extend fallback mappings.', ruleId: r.id, fileName: r.sourceFile });
-    if (r.useCaseId !== 'unassigned' && !knownUseCases.has(r.useCaseId)) issues.push({ severity: 'warning', type: 'unknown_use_case_registry', title: `Rule ${r.id} uses unknown use case ${r.useCaseId}`, detail: 'The use_case info tag resolves to an ID that is not registered in the use-case catalog.', ruleId: r.id, fileName: r.sourceFile });
-    if (r.jiraVisible && r.mitre.length === 0) issues.push({ severity: 'warning', type: 'jira_without_mitre', title: `Jira-visible rule ${r.id} has no MITRE`, detail: 'Level >= 11 but no MITRE technique was found.', ruleId: r.id });
-    if (r.level === 0 && r.mitre.length > 0) issues.push({ severity: 'info', type: 'helper_with_mitre', title: `Helper rule ${r.id} has MITRE`, detail: 'Level 0 helper rules usually should not carry ATT&CK mapping unless intentional.', ruleId: r.id });
-    if (r.level > 15) issues.push({ severity: 'warning', type: 'level_above_standard', title: `Rule ${r.id} level is above 15`, detail: `Detected level ${r.level}. Confirm this is accepted by your Wazuh version and workflow.`, ruleId: r.id });
+    if (r.useCaseId === 'unassigned') issues.push({ severity: 'warning', type: 'missing_use_case', title: `Rule ${r.id} has no use case`, detail: 'Add <info type="text">use_case:...</info> or extend fallback mappings.', ruleId: r.id, fileName: r.sourceFile, tenant: r.tenant });
+    if (r.useCaseId !== 'unassigned' && !knownUseCases.has(r.useCaseId)) issues.push({ severity: 'warning', type: 'unknown_use_case_registry', title: `Rule ${r.id} uses unknown use case ${r.useCaseId}`, detail: 'The use_case info tag resolves to an ID that is not registered in the use-case catalog.', ruleId: r.id, fileName: r.sourceFile, tenant: r.tenant });
+    if (r.jiraVisible && r.mitre.length === 0) issues.push({ severity: 'warning', type: 'jira_without_mitre', title: `Jira-visible rule ${r.id} has no MITRE`, detail: 'Level >= 11 but no MITRE technique was found.', ruleId: r.id, tenant: r.tenant });
+    if (r.level === 0 && r.mitre.length > 0) issues.push({ severity: 'info', type: 'helper_with_mitre', title: `Helper rule ${r.id} has MITRE`, detail: 'Level 0 helper rules usually should not carry ATT&CK mapping unless intentional.', ruleId: r.id, tenant: r.tenant });
+    if (r.level > 15) issues.push({ severity: 'warning', type: 'level_above_standard', title: `Rule ${r.id} level is above 15`, detail: `Detected level ${r.level}. Confirm this is accepted by your Wazuh version and workflow.`, ruleId: r.id, tenant: r.tenant });
     for (const dep of r.dependencies) {
-      if ((dep.type === 'if_sid' || dep.type === 'if_matched_sid') && !ruleIds.has(dep.value)) issues.push({ severity: 'warning', type: 'external_or_missing_sid', title: `Rule ${r.id} references SID ${dep.value}`, detail: 'The SID was not found in uploaded rule files. It may be a stock Wazuh rule or a missing file.', ruleId: r.id });
-      if ((dep.type === 'if_group' || dep.type === 'if_matched_group') && !groupsProduced.has(dep.value)) issues.push({ severity: 'warning', type: 'missing_group_dependency', title: `Rule ${r.id} references group ${dep.value}`, detail: 'No uploaded rule produces this group. It may be external, missing, or typo.', ruleId: r.id });
-      if (dep.type === 'decoded_as' && !decoderNames.has(dep.value)) issues.push({ severity: 'warning', type: 'missing_decoder', title: `Rule ${r.id} uses decoder ${dep.value}`, detail: 'No uploaded decoder block has this exact decoder name.', ruleId: r.id });
+      if ((dep.type === 'if_sid' || dep.type === 'if_matched_sid') && !ruleIds.has(dep.value)) issues.push({ severity: 'warning', type: 'external_or_missing_sid', title: `Rule ${r.id} references SID ${dep.value}`, detail: 'The SID was not found in uploaded rule files. It may be a stock Wazuh rule or a missing file.', ruleId: r.id, tenant: r.tenant });
+      if ((dep.type === 'if_group' || dep.type === 'if_matched_group') && !groupsProduced.has(dep.value)) issues.push({ severity: 'warning', type: 'missing_group_dependency', title: `Rule ${r.id} references group ${dep.value}`, detail: 'No uploaded rule produces this group. It may be external, missing, or typo.', ruleId: r.id, tenant: r.tenant });
+      if (dep.type === 'decoded_as' && !decoderNames.has(dep.value)) issues.push({ severity: 'warning', type: 'missing_decoder', title: `Rule ${r.id} uses decoder ${dep.value}`, detail: 'No uploaded decoder block has this exact decoder name.', ruleId: r.id, tenant: r.tenant });
     }
   }
 
   for (const d of decoders) {
-    if (d.parent && !decoderNames.has(d.parent)) issues.push({ severity: 'info', type: 'external_decoder_parent', title: `Decoder ${d.name} parent not uploaded`, detail: `Parent decoder ${d.parent} was not found in uploaded decoder files. It may be stock/built-in or in another file.`, decoderName: d.name });
+    if (d.parent && !decoderNames.has(d.parent)) issues.push({ severity: 'info', type: 'external_decoder_parent', title: `Decoder ${d.name} parent not uploaded`, detail: `Parent decoder ${d.parent} was not found in uploaded decoder files. It may be stock/built-in or in another file.`, decoderName: d.name, tenant: d.tenant });
   }
 
-  for (const f of files) if (f.type === 'unknown') issues.push({ severity: 'info', type: 'unknown_file_type', title: `Unknown file type: ${f.name}`, detail: 'The file did not clearly look like rules or decoders XML.', fileName: f.name });
+  for (const f of files) if (f.type === 'unknown') issues.push({ severity: 'info', type: 'unknown_file_type', title: `Unknown file type: ${f.name}`, detail: 'The file did not clearly look like rules or decoders XML.', fileName: f.name, tenant: f.tenant || tenantFromSourceName(f.name) });
   return issues;
 };
 
