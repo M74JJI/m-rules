@@ -32,7 +32,7 @@ export function SurfaceCard({
   return (
     <Card
       className={cn(
-        "gap-0 border-border/70 bg-card/95 py-0 shadow-[0_10px_24px_rgba(15,23,42,0.08)] backdrop-blur",
+        "gap-0 border-border bg-card py-0 shadow-[0_1px_2px_rgba(15,23,42,0.04)]",
         className
       )}
       {...props}
@@ -50,7 +50,7 @@ export function SubtleCard({
   return (
     <Card
       className={cn(
-        "gap-0 border-border/60 bg-muted/40 py-0 shadow-none",
+        "gap-0 border-border/80 bg-muted/35 py-0 shadow-none",
         className
       )}
       {...props}
@@ -95,7 +95,7 @@ export function Button({
     <ShadButton
       variant={tone === "danger" ? "destructive" : tone === "default" ? "outline" : "default"}
       className={cn(
-        "rounded-xl",
+        "rounded-lg",
         tone === "primary" && "bg-primary text-primary-foreground hover:bg-primary/90",
         tone === "success" && "bg-emerald-600 text-white hover:bg-emerald-500 dark:bg-emerald-600 dark:hover:bg-emerald-500",
         className
@@ -111,7 +111,7 @@ export function Input({
   className,
   ...props
 }: ComponentPropsWithoutRef<"input">) {
-  return <ShadInput className={cn("rounded-xl", className)} {...props} />;
+  return <ShadInput className={cn("rounded-lg", className)} {...props} />;
 }
 
 type SelectProps = Omit<ComponentPropsWithoutRef<"select">, "size"> & {
@@ -138,7 +138,7 @@ export function Textarea({
   className,
   ...props
 }: ComponentPropsWithoutRef<"textarea">) {
-  return <ShadTextarea className={cn("rounded-xl", className)} {...props} />;
+  return <ShadTextarea className={cn("rounded-lg", className)} {...props} />;
 }
 
 export function FieldLabel({

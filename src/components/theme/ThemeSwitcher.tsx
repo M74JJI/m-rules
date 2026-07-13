@@ -4,7 +4,6 @@ import { Moon, Sun } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTheme } from "@/components/theme/ThemeProvider";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
 
 export default function ThemeSwitcher() {
   const { resolvedTheme, setTheme } = useTheme();
@@ -15,31 +14,19 @@ export default function ThemeSwitcher() {
   }, []);
 
   const activeTheme = mounted ? resolvedTheme : "dark";
+  const nextTheme = activeTheme === "dark" ? "light" : "dark";
 
   return (
-    <div className="inline-flex items-center gap-1 rounded-xl border border-border/60 bg-card/80 p-1 shadow-sm backdrop-blur">
-      <Button
-        type="button"
-        variant={activeTheme === "light" ? "secondary" : "ghost"}
-        size="sm"
-        className={cn("h-8 px-2.5", activeTheme !== "light" && "text-muted-foreground")}
-        onClick={() => setTheme("light")}
-        aria-pressed={activeTheme === "light"}
-      >
-        <Sun className="size-4" />
-        <span className="hidden sm:inline">Light</span>
-      </Button>
-      <Button
-        type="button"
-        variant={activeTheme === "dark" ? "secondary" : "ghost"}
-        size="sm"
-        className={cn("h-8 px-2.5", activeTheme !== "dark" && "text-muted-foreground")}
-        onClick={() => setTheme("dark")}
-        aria-pressed={activeTheme === "dark"}
-      >
-        <Moon className="size-4" />
-        <span className="hidden sm:inline">Dark</span>
-      </Button>
-    </div>
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      className="text-muted-foreground hover:text-foreground"
+      onClick={() => setTheme(nextTheme)}
+      aria-label={`Switch to ${nextTheme} mode`}
+      title={`Switch to ${nextTheme} mode`}
+    >
+      {activeTheme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
+    </Button>
   );
 }

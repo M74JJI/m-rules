@@ -1,6 +1,30 @@
 'use client';
 
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Activity,
+  Boxes,
+  Braces,
+  ChartNoAxesCombined,
+  CircleGauge,
+  ClipboardCheck,
+  CodeXml,
+  Database,
+  FileCode2,
+  FileSearch,
+  GitBranch,
+  Library,
+  ListTree,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Radar,
+  Search,
+  ShieldCheck,
+  Sparkles,
+  TableProperties,
+  Tags,
+  type LucideIcon,
+} from 'lucide-react';
 import { Badge, Button, FieldLabel, Input, SectionHeader, Select, SubtleCard, SurfaceCard, Textarea } from '@/components/ui/primitives';
 import { cx } from '@/lib/cx';
 import type { DecoderRecord, ParsedCollection, RuleRecord, UploadedFile, UseCaseRecord, ValidationIssue } from './lib/types';
@@ -221,28 +245,28 @@ function restoreGraphCollection(): ParsedCollection {
   return empty;
 }
 
-const NAV_VIEWS: { id: ActiveView; label: string; desc: string; group: string }[] = [
-  { id: 'upload', label: 'Source', desc: 'Refresh manager archives', group: 'Setup' },
-  { id: 'command', label: 'Overview', desc: 'Summary and status', group: 'Setup' },
-  { id: 'rules', label: 'Rules', desc: 'Rule explorer and search', group: 'Intelligence' },
-  { id: 'decoders', label: 'Decoders', desc: 'Decoder explorer', group: 'Intelligence' },
-  { id: 'fields', label: 'Field Matrix', desc: 'Decoder-to-rule field coverage', group: 'Intelligence' },
-  { id: 'graph', label: 'Graph', desc: 'Topology workbench', group: 'Graphs' },
-  { id: 'mitre', label: 'MITRE', desc: 'ATT&CK technique coverage', group: 'Graphs' },
-  { id: 'validation', label: 'Validation', desc: 'Quality gates and issues', group: 'Governance' },
-  { id: 'coverage', label: 'Coverage', desc: 'Use case, MITRE, decoder coverage', group: 'Governance' },
-  { id: 'quality', label: 'Quality', desc: 'Rule scoring and risk', group: 'Governance' },
-  { id: 'templates', label: 'Templates', desc: 'Rule template library', group: 'Composer' },
-  { id: 'composer', label: 'Composer', desc: 'Visual rule XML builder', group: 'Composer' },
-  { id: 'useCaseStudio', label: 'Use Case Studio', desc: 'Register and search use cases', group: 'Composer' },
-  { id: 'usecases', label: 'Use Cases', desc: 'Detection coverage tree', group: 'Intelligence' },
-  { id: 'fieldIntel', label: 'Fields', desc: 'Lineage, aliases, risk', group: 'Intelligence' },
-  { id: 'files', label: 'Source Files', desc: 'Raw XML evidence', group: 'Governance' },
-  { id: 'search', label: 'Search', desc: 'Full-text query', group: 'Tools' },
-  { id: 'ai', label: 'Analysis', desc: 'Deterministic rule analysis', group: 'Tools' },
-  { id: 'roundtrip', label: 'Roundtrip', desc: 'XML reconstruction analysis', group: 'Tools' },
+const NAV_VIEWS: { id: ActiveView; label: string; desc: string; group: string; icon: LucideIcon }[] = [
+  { id: 'command', label: 'Overview', desc: 'Summary and operational status', group: 'Workspace', icon: CircleGauge },
+  { id: 'upload', label: 'Data source', desc: 'Refresh manager archives', group: 'Workspace', icon: Database },
+  { id: 'rules', label: 'Rules', desc: 'Explore and search detection rules', group: 'Detection', icon: ShieldCheck },
+  { id: 'decoders', label: 'Decoders', desc: 'Inspect decoder hierarchy', group: 'Detection', icon: Braces },
+  { id: 'usecases', label: 'Use cases', desc: 'Browse detection coverage tree', group: 'Detection', icon: ListTree },
+  { id: 'fields', label: 'Field matrix', desc: 'Map decoder-to-rule coverage', group: 'Detection', icon: TableProperties },
+  { id: 'fieldIntel', label: 'Field intelligence', desc: 'Inspect lineage, aliases, and risk', group: 'Detection', icon: Tags },
+  { id: 'graph', label: 'Dependency graph', desc: 'Explore ruleset topology', group: 'Analytics', icon: GitBranch },
+  { id: 'mitre', label: 'MITRE ATT&CK', desc: 'Review technique coverage', group: 'Analytics', icon: Radar },
+  { id: 'coverage', label: 'Coverage', desc: 'Analyze detection coverage', group: 'Analytics', icon: ChartNoAxesCombined },
+  { id: 'validation', label: 'Validation', desc: 'Review quality gates and issues', group: 'Governance', icon: ClipboardCheck },
+  { id: 'quality', label: 'Quality scores', desc: 'Review rule score and risk', group: 'Governance', icon: Activity },
+  { id: 'files', label: 'Source files', desc: 'Inspect raw XML evidence', group: 'Governance', icon: FileCode2 },
+  { id: 'templates', label: 'Templates', desc: 'Browse rule template library', group: 'Authoring', icon: Library },
+  { id: 'composer', label: 'Rule composer', desc: 'Build rule XML visually', group: 'Authoring', icon: CodeXml },
+  { id: 'useCaseStudio', label: 'Use case studio', desc: 'Register and search use cases', group: 'Authoring', icon: Boxes },
+  { id: 'search', label: 'Global search', desc: 'Query all loaded intelligence', group: 'Tools', icon: Search },
+  { id: 'ai', label: 'Rule analysis', desc: 'Run deterministic rule analysis', group: 'Tools', icon: Sparkles },
+  { id: 'roundtrip', label: 'XML roundtrip', desc: 'Analyze XML reconstruction', group: 'Tools', icon: FileSearch },
 ];
-const NAV_GROUPS = ['Setup', 'Intelligence', 'Graphs', 'Governance', 'Composer', 'Tools'];
+const NAV_GROUPS = ['Workspace', 'Detection', 'Analytics', 'Governance', 'Authoring', 'Tools'];
 
 // ---- Utility helpers ----
 const copyToClipboard = async (value: string) => { if (!value) return; await navigator.clipboard.writeText(value); };
@@ -264,10 +288,10 @@ function KPI({ label, value, sub, tone }: { label: string; value: number | strin
           ? 'border-emerald-500/25 bg-emerald-500/10'
           : 'border-sky-500/20 bg-sky-500/10';
   return (
-    <SubtleCard className={cx('space-y-1 rounded-2xl p-4', toneClass)}>
-      <div className="text-xs font-semibold uppercase tracking-wider text-[var(--text-soft)]">{label}</div>
-      <div className="text-2xl font-bold text-[var(--text)] mt-1">{typeof value === 'number' ? fmt(value) : value}</div>
-      <div className="text-xs text-[var(--text-soft)] mt-0.5">{sub}</div>
+    <SubtleCard className={cx('dashboard-kpi p-4', toneClass)} data-tone={tone || 'cyan'}>
+      <div className="dashboard-kpi-label">{label}</div>
+      <div className="dashboard-kpi-value">{typeof value === 'number' ? fmt(value) : value}</div>
+      <div className="dashboard-kpi-sub">{sub}</div>
     </SubtleCard>
   );
 }
@@ -418,21 +442,21 @@ function RulesHubTopBar({
   ];
 
   return (
-    <SurfaceCard className="relative overflow-hidden rounded-none border-x-0 border-border/80 bg-[var(--panel)] p-5 md:p-6">
+    <SurfaceCard className="workspace-overview relative overflow-hidden rounded-none border-x-0 border-t-0 bg-[var(--panel)] p-5">
       <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-[var(--accent)]/35 to-transparent" />
-      <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
-        <div className="max-w-4xl space-y-3">
+      <div className="workspace-overview-main flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+        <div className="workspace-overview-copy max-w-4xl space-y-3">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--text)]">Workspace Overview</span>
             <Badge className="text-xs" tone="muted">{hasData ? `${fmt(data.files.length)} files` : 'Ready for import'}</Badge>
             {hasData ? <Badge className="text-xs" tone="muted">{selectedTenant === ALL_TENANTS ? 'All clients deduped' : `Client ${selectedTenant}`}</Badge> : null}
           </div>
-          <h1 className="max-w-3xl text-[2rem] font-black tracking-[-0.05em] text-[var(--text)] md:text-[2.75rem]">Rule analysis and use case operations</h1>
+          <h1 className="max-w-3xl text-2xl font-bold tracking-[-0.035em] text-[var(--text)] md:text-[2rem]">Detection operations</h1>
           <p className="max-w-3xl text-sm leading-6 text-[var(--text)]/80 md:text-[15px]">
             Review rules, decoders, validation, graphs, and the use case catalog in one clean workspace.
           </p>
         </div>
-        <SubtleCard className="min-w-0 flex flex-col gap-4 p-4 xl:min-w-[340px]">
+        <SubtleCard className="workspace-source-panel min-w-0 flex flex-col gap-4 p-4 xl:min-w-[340px]">
           {hasData ? (
             <div className="space-y-1.5">
               <FieldLabel>Client scope</FieldLabel>
@@ -533,7 +557,7 @@ function RulesHubTopBar({
         </SubtleCard>
       </div>
       {hasData ? (
-        <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
+        <div className="workspace-kpi-grid mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
           {kpis.map((kpi) => <KPI key={kpi.label} label={kpi.label} value={kpi.value} sub={kpi.sub} tone={kpi.tone} />)}
         </div>
       ) : null}
@@ -592,14 +616,6 @@ function CommandCenter({ data }: { data: ParsedCollection }) {
   }, [data.rules]);
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        <KPI label="Rules" value={data.stats.rules} sub="Parsed Wazuh rules" tone="cyan" />
-        <KPI label="Decoders" value={data.stats.decoders} sub="Parsed decoder blocks" tone="purple" />
-        <KPI label="Use Cases" value={data.stats.useCases} sub="Confirmed/inferred" tone="green" />
-        <KPI label="Jira-visible" value={data.stats.jiraVisible} sub="Level ≥ 11" tone="amber" />
-        <KPI label="Critical" value={data.stats.critical} sub="Level ≥ 12" tone="red" />
-        <KPI label="Issues" value={data.issues.length} sub="Validation findings" tone={data.issues.length ? 'red' : 'green'} />
-      </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <SurfaceCard className="p-4">
           <div className="text-sm font-semibold text-[var(--text)] mb-3">Ruleset Posture</div>
@@ -2123,6 +2139,7 @@ export default function WazuhRulesHub({ currentUser, initialCustomUseCases = [] 
   const [view, setView] = useState<ActiveView>(data.files.length ? 'graph' : 'upload');
   const [selected, setSelected] = useState<Selected>(null);
   const [selectedTenant, setSelectedTenant] = useState(ALL_TENANTS);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [managerStatus, setManagerStatus] = useState<ManagerArchiveStatus>({
     rootPath: null,
@@ -2333,6 +2350,7 @@ export default function WazuhRulesHub({ currentUser, initialCustomUseCases = [] 
   ), [data.files]);
   const displayData = useMemo(() => buildTenantScopedCollection(data, selectedTenant, useCaseCatalog), [data, selectedTenant, useCaseCatalog]);
   const canOpenView = (id: ActiveView) => hasData || ['upload', 'useCaseStudio'].includes(id);
+  const activeView = NAV_VIEWS.find((item) => item.id === view) || NAV_VIEWS[0];
 
   useEffect(() => {
     if (selectedTenant !== ALL_TENANTS && !tenants.includes(selectedTenant)) {
@@ -2346,28 +2364,29 @@ export default function WazuhRulesHub({ currentUser, initialCustomUseCases = [] 
 
   return (
     <div className="app-theme-unify app-surface-stack">
-      <RulesHubTopBar
-        data={displayData}
-        rawData={data}
-        hasData={hasData}
-        busy={busy}
-        managerStatus={managerStatus}
-        tenants={tenants}
-        selectedTenant={selectedTenant}
-        onTenantChange={setSelectedTenant}
-        onRefreshManager={() => { void refreshManagerFiles(); }}
-        onLoadFiles={handleFileList}
-      />
-
-      <div className="app-workspace-shell">
+      <div className={cx('app-workspace-shell', sidebarCollapsed && 'is-sidebar-collapsed')}>
         <aside className="app-sidebar">
-          <SubtleCard className="app-tab-rail border-0 rounded-none p-2">
+          <div className="app-tab-rail">
+            <div className="app-sidebar-heading">
+              <div className="app-sidebar-heading-copy">
+                <span>Navigation</span>
+                <strong>Rules Hub</strong>
+              </div>
+              <button
+                type="button"
+                className="app-sidebar-collapse"
+                onClick={() => setSidebarCollapsed((current) => !current)}
+                aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              >
+                {sidebarCollapsed ? <PanelLeftOpen /> : <PanelLeftClose />}
+              </button>
+            </div>
             <div className="app-sidebar-sections custom-scrollbar">
               {NAV_GROUPS.map((group) => {
                 const groupViews = NAV_VIEWS.filter((v) => v.group === group);
                 return (
                   <div key={group} className="app-tab-group">
-                    <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--text-soft)]">{group}</span>
+                    <span className="app-tab-group-label">{group}</span>
                     {groupViews.map((v) => (
                       <button
                         key={v.id}
@@ -2378,18 +2397,51 @@ export default function WazuhRulesHub({ currentUser, initialCustomUseCases = [] 
                         className={cx('app-tab-button', view === v.id ? 'is-active' : !canOpenView(v.id) ? 'is-disabled' : undefined)}
                         title={v.desc}
                       >
-                        <span>{v.label}</span>
-                        <small>{v.desc}</small>
+                        <v.icon className="app-tab-icon" />
+                        <span className="app-tab-label">{v.label}</span>
                       </button>
                     ))}
                   </div>
                 );
               })}
             </div>
-          </SubtleCard>
+            <div className="app-sidebar-footer">
+              <span className={cx('workspace-status-dot', managerStatus.phase === 'error' ? 'is-error' : managerStatus.phase === 'ready' ? 'is-ready' : 'is-busy')} />
+              <div><strong>{managerStatus.phase === 'ready' ? 'Source connected' : managerStatus.phase === 'error' ? 'Source error' : 'Source syncing'}</strong><span>{fmt(managerStatus.fileCount)} XML files</span></div>
+            </div>
+          </div>
         </aside>
 
         <div className="app-workspace-content">
+          {view === 'command' ? <RulesHubTopBar
+            data={displayData}
+            rawData={data}
+            hasData={hasData}
+            busy={busy}
+            managerStatus={managerStatus}
+            tenants={tenants}
+            selectedTenant={selectedTenant}
+            onTenantChange={setSelectedTenant}
+            onRefreshManager={() => { void refreshManagerFiles(); }}
+            onLoadFiles={handleFileList}
+          /> : null}
+          {view !== 'command' ? <div className="app-view-heading">
+            <div>
+              <span>{activeView.group}</span>
+              <h2>{activeView.label}</h2>
+              <p>{activeView.desc}</p>
+            </div>
+            <div className="app-view-actions">
+              {hasData ? (
+                <Select className="h-9 min-w-[190px] text-xs font-semibold" value={selectedTenant} onChange={(event) => setSelectedTenant(event.target.value)} aria-label="Client scope">
+                  <option value={ALL_TENANTS}>All clients (deduped)</option>
+                  {tenants.map((tenant) => <option key={tenant} value={tenant}>{tenantLabel(tenant)}</option>)}
+                </Select>
+              ) : null}
+              <Button className="h-9" onClick={() => { void refreshManagerFiles(); }} disabled={busy}>{busy ? 'Refreshing...' : 'Refresh source'}</Button>
+            </div>
+          </div> : null}
+          <div className="app-view-content">
           {view === 'upload' && (
             <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(320px,420px)_1fr]">
               <UploadCard onLoaded={handleFilesLoaded} files={files} />
@@ -2422,6 +2474,7 @@ export default function WazuhRulesHub({ currentUser, initialCustomUseCases = [] 
               <Button tone="primary" onClick={() => setView('upload')}>Go to Upload</Button>
             </SurfaceCard>
           )}
+          </div>
         </div>
       </div>
 
