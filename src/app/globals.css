@@ -1866,9 +1866,9 @@ body {
 }
 
 .client-compare-client-list {
-  display: flex;
-  flex-wrap: wrap;
-  align-content: flex-start;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  align-content: start;
   gap: 0.5rem;
 }
 
@@ -1890,7 +1890,11 @@ body {
 .client-compare-client-option:has([data-state="checked"]) {
   border-color: color-mix(in oklch, var(--primary) 45%, var(--border));
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--text);
+}
+
+.client-compare-client-option:has([data-state="checked"]) > span {
+  color: var(--text);
 }
 
 .client-compare-baseline {
@@ -1915,7 +1919,7 @@ body {
 
 .client-snapshot-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
   gap: 1rem;
   margin-top: 1.25rem;
 }
@@ -1940,8 +1944,8 @@ body {
 
 .client-snapshot > div {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 0.6rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.8rem 0.6rem;
   margin-top: 0.85rem;
 }
 
