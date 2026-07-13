@@ -1955,3 +1955,336 @@ body {
     padding: 0 1rem 1rem;
   }
 }
+
+/* Sign-in product shell */
+.signin-screen {
+  min-height: 100dvh;
+  padding: clamp(1rem, 3vw, 2.5rem);
+  background:
+    radial-gradient(circle at 78% 12%, color-mix(in oklch, var(--primary) 10%, transparent), transparent 28%),
+    linear-gradient(145deg, var(--bg), color-mix(in oklch, var(--accent-soft) 48%, var(--bg)));
+}
+
+.signin-screen::before {
+  display: none;
+}
+
+.signin-shell {
+  display: grid;
+  width: min(100%, 1120px);
+  min-height: min(720px, calc(100dvh - 2rem));
+  grid-template-columns: minmax(0, 1.08fr) minmax(420px, 0.92fr);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 28px;
+  background: var(--panel);
+  box-shadow: 0 28px 80px rgba(42, 37, 91, 0.15);
+}
+
+.signin-product-panel {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  overflow: hidden;
+  background: oklch(0.23 0.085 274);
+  color: white;
+  padding: clamp(2rem, 4vw, 3.5rem);
+}
+
+.signin-product-panel::before,
+.signin-product-panel::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  border-radius: 999px;
+  pointer-events: none;
+}
+
+.signin-product-panel::before {
+  width: 360px;
+  height: 360px;
+  top: -190px;
+  right: -150px;
+  border: 70px solid rgba(132, 104, 255, 0.14);
+}
+
+.signin-product-panel::after {
+  width: 260px;
+  height: 260px;
+  bottom: -150px;
+  left: -120px;
+  background: rgba(96, 113, 255, 0.1);
+}
+
+.signin-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+}
+
+.signin-brand-mark {
+  display: inline-flex;
+  width: 44px;
+  height: 44px;
+  align-items: center;
+  justify-content: center;
+}
+
+.signin-brand-mark img {
+  width: 42px;
+  height: 42px;
+  object-fit: contain;
+}
+
+.signin-brand > span:last-child {
+  display: grid;
+  gap: 0.1rem;
+}
+
+.signin-brand strong {
+  font-size: 1rem;
+  letter-spacing: -0.02em;
+}
+
+.signin-brand small {
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.signin-product-copy {
+  max-width: 570px;
+  margin: auto 0 2.5rem;
+}
+
+.signin-kicker {
+  display: block;
+  color: var(--primary);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.signin-product-panel .signin-kicker {
+  color: oklch(0.78 0.13 274);
+}
+
+.signin-product-copy h1 {
+  margin: 0.8rem 0 1rem;
+  color: white;
+  font-size: clamp(2.35rem, 4.6vw, 4.25rem);
+  font-weight: 760;
+  letter-spacing: -0.055em;
+  line-height: 0.98;
+}
+
+.signin-product-copy p {
+  max-width: 540px;
+  margin: 0;
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 0.94rem;
+  line-height: 1.75;
+}
+
+.signin-capabilities {
+  display: grid;
+  gap: 0.7rem;
+  margin-bottom: 2rem;
+}
+
+.signin-capabilities > div,
+.signin-trust-note {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+}
+
+.signin-capabilities svg {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  color: oklch(0.78 0.13 274);
+}
+
+.signin-capabilities span,
+.signin-trust-note span {
+  display: grid;
+  gap: 0.12rem;
+}
+
+.signin-capabilities strong {
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 0.76rem;
+  font-weight: 650;
+}
+
+.signin-capabilities small {
+  color: rgba(255, 255, 255, 0.48);
+  font-size: 0.68rem;
+}
+
+.signin-product-foot {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.38);
+  font-size: 0.65rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.signin-login-panel {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  background: var(--panel);
+  padding: clamp(1.5rem, 3vw, 2.5rem);
+}
+
+.signin-theme-control {
+  display: flex;
+  min-height: 36px;
+  justify-content: flex-end;
+}
+
+.signin-login-content {
+  width: min(100%, 410px);
+  margin: auto;
+}
+
+.signin-login-content h2 {
+  margin: 0.65rem 0 0.75rem;
+  color: var(--text);
+  font-size: clamp(2rem, 3vw, 2.75rem);
+  font-weight: 750;
+  letter-spacing: -0.045em;
+  line-height: 1.05;
+}
+
+.signin-login-content > p {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 0.88rem;
+  line-height: 1.7;
+}
+
+.signin-form,
+.signin-config-alert {
+  margin-top: 2rem;
+}
+
+.signin-submit {
+  min-height: 50px !important;
+  border: 0 !important;
+  border-radius: 14px !important;
+  background: linear-gradient(100deg, var(--primary), oklch(0.66 0.2 305)) !important;
+  color: white !important;
+  box-shadow: 0 14px 28px color-mix(in oklch, var(--primary) 24%, transparent);
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.signin-submit:hover {
+  filter: brightness(1.04);
+}
+
+.signin-submit svg {
+  width: 17px;
+  height: 17px;
+  margin-left: auto;
+}
+
+.signin-trust-note {
+  margin-top: 1.5rem;
+  border-top: 1px solid var(--border);
+  padding-top: 1.25rem;
+}
+
+.signin-trust-note > svg {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  color: var(--success);
+}
+
+.signin-trust-note strong {
+  color: var(--text);
+  font-size: 0.72rem;
+  font-weight: 650;
+}
+
+.signin-trust-note small {
+  color: var(--text-muted);
+  font-size: 0.65rem;
+  line-height: 1.45;
+}
+
+.signin-legal {
+  margin: 1.5rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.62rem;
+  text-align: center;
+}
+
+.dark .signin-shell {
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.34);
+}
+
+.dark .signin-product-panel {
+  background: oklch(0.13 0.045 274);
+}
+
+@media (max-width: 860px) {
+  .signin-shell {
+    min-height: 0;
+    grid-template-columns: 1fr;
+  }
+
+  .signin-product-panel {
+    min-height: 300px;
+    padding: 1.75rem;
+  }
+
+  .signin-product-copy {
+    margin: 2.5rem 0 0;
+  }
+
+  .signin-product-copy h1 {
+    font-size: clamp(2rem, 9vw, 3rem);
+  }
+
+  .signin-capabilities,
+  .signin-product-foot {
+    display: none;
+  }
+
+  .signin-login-panel {
+    min-height: 440px;
+    padding: 1.5rem;
+  }
+}
+
+@media (max-width: 520px) {
+  .signin-screen {
+    display: block;
+    padding: 0;
+  }
+
+  .signin-shell {
+    min-height: 100dvh;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .signin-product-panel {
+    min-height: 260px;
+  }
+
+  .signin-product-copy p {
+    font-size: 0.8rem;
+  }
+}
