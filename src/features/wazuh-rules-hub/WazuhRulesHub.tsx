@@ -39,6 +39,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { Badge, Button, FieldLabel, Input, SectionHeader, Select, SubtleCard, SurfaceCard, Textarea } from '@/components/ui/primitives';
+import { Checkbox } from '@/components/ui/checkbox';
 import { cx } from '@/lib/cx';
 import type { DecoderRecord, ParsedCollection, RuleRecord, UploadedFile, UseCaseRecord, ValidationIssue } from './lib/types';
 import { parseCollection, readUploadedFiles } from './lib/parser';
@@ -717,13 +718,14 @@ function CommandCenter({ data }: { data: ParsedCollection }) {
 }
 
 type ComparisonAspect = 'rules' | 'decoders' | 'use_cases' | 'mitre' | 'fields' | 'files' | 'validation';
-type ComparisonStatus = 'only_left' | 'changed' | 'only_right';
+type ComparisonStatus = 'unique' | 'missing_clients' | 'changed';
 type ComparisonRow = {
   aspect: ComparisonAspect;
   key: string;
   status: ComparisonStatus;
-  leftValue: string;
-  rightValue: string;
+  presentTenants: string[];
+  missingTenants: string[];
+  values: Record<string, string>;
   detail: string;
 };
 
@@ -794,20 +796,26 @@ function decoderChangedFields(left: DecoderRecord[], right: DecoderRecord[]) {
 }
 
 function ClientComparison({ data, tenants, useCaseCatalog }: { data: ParsedCollection; tenants: string[]; useCaseCatalog: UseCaseRecord[] }) {
-  const [leftTenant, setLeftTenant] = useState(tenants[0] || '');
-  const [rightTenant, setRightTenant] = useState(tenants[1] || tenants[0] || '');
+  const [selectedTenants, setSelectedTenants] = useState<string[]>(() => tenants);
+  const [baselineTenant, setBaselineTenant] = useState(tenants[0] || '');
   const [aspect, setAspect] = useState<'all' | ComparisonAspect>('all');
   const [status, setStatus] = useState<'all' | ComparisonStatus>('all');
   const [query, setQuery] = useState('');
   const deferredQuery = useDeferredValue(query);
+  const knownTenants = useRef(new Set(tenants));
 
   useEffect(() => {
-    if (!tenants.length) return;
-    if (!tenants.includes(leftTenant)) setLeftTenant(tenants[0]);
-    if (!tenants.includes(rightTenant) || rightTenant === leftTenant) {
-      setRightTenant(tenants.find((tenant) => tenant !== leftTenant) || tenants[0]);
-    }
-  }, [leftTenant, rightTenant, tenants]);
+    const previous = knownTenants.current;
+    setSelectedTenants((current) => [
+      ...current.filter((tenant) => tenants.includes(tenant)),
+      ...tenants.filter((tenant) => !previous.has(tenant)),
+    ]);
+    knownTenants.current = new Set(tenants);
+  }, [tenants]);
+
+  useEffect(() => {
+    if (!selectedTenants.includes(baselineTenant)) setBaselineTenant(selectedTenants[0] || '');
+  }, [baselineTenant, selectedTenants]);
 
   const comparison = useMemo(() => {
     const snapshotFor = (tenant: string) => {
@@ -828,56 +836,119 @@ function ClientComparison({ data, tenants, useCaseCatalog }: { data: ParsedColle
       };
     };
 
-    const left = snapshotFor(leftTenant);
-    const right = snapshotFor(rightTenant);
+    const snapshots = selectedTenants.map(snapshotFor);
     const rows: ComparisonRow[] = [];
 
     const compareGroups = <T,>(
       aspectName: ComparisonAspect,
-      leftGroups: Map<string, T[]>,
-      rightGroups: Map<string, T[]>,
+      groupsByTenant: Map<string, Map<string, T[]>>,
       fingerprint: (items: T[]) => string,
-      changedDetail: (leftItems: T[], rightItems: T[]) => string,
+      changedFields: (baselineItems: T[], currentItems: T[]) => string[],
       valueFor: (items: T[]) => string = (items) => `${items.length} present`,
     ) => {
-      const keys = new Set([...leftGroups.keys(), ...rightGroups.keys()]);
+      const keys = new Set<string>();
+      groupsByTenant.forEach((groups) => groups.forEach((_, key) => keys.add(key)));
       for (const key of keys) {
-        const leftItems = leftGroups.get(key) || [];
-        const rightItems = rightGroups.get(key) || [];
-        if (!rightItems.length) rows.push({ aspect: aspectName, key, status: 'only_left', leftValue: valueFor(leftItems), rightValue: 'Missing', detail: `Only in ${leftTenant}` });
-        else if (!leftItems.length) rows.push({ aspect: aspectName, key, status: 'only_right', leftValue: 'Missing', rightValue: valueFor(rightItems), detail: `Only in ${rightTenant}` });
-        else if (fingerprint(leftItems) !== fingerprint(rightItems)) rows.push({ aspect: aspectName, key, status: 'changed', leftValue: valueFor(leftItems), rightValue: valueFor(rightItems), detail: changedDetail(leftItems, rightItems) });
+        const presentTenants = selectedTenants.filter((tenant) => (groupsByTenant.get(tenant)?.get(key)?.length || 0) > 0);
+        const missingTenants = selectedTenants.filter((tenant) => !presentTenants.includes(tenant));
+        const values = Object.fromEntries(selectedTenants.map((tenant) => {
+          const items = groupsByTenant.get(tenant)?.get(key) || [];
+          return [tenant, items.length ? valueFor(items) : 'Missing'];
+        }));
+        const fingerprints = new Set(presentTenants.map((tenant) => fingerprint(groupsByTenant.get(tenant)?.get(key) || [])));
+        if (!missingTenants.length && fingerprints.size <= 1) continue;
+
+        const statusValue: ComparisonStatus = presentTenants.length === 1 ? 'unique' : missingTenants.length ? 'missing_clients' : 'changed';
+        const referenceTenant = presentTenants.includes(baselineTenant) ? baselineTenant : presentTenants[0];
+        const referenceItems = groupsByTenant.get(referenceTenant)?.get(key) || [];
+        const changed = presentTenants
+          .filter((tenant) => tenant !== referenceTenant && fingerprint(groupsByTenant.get(tenant)?.get(key) || []) !== fingerprint(referenceItems))
+          .map((tenant) => {
+            const fields = changedFields(referenceItems, groupsByTenant.get(tenant)?.get(key) || []);
+            return `${tenant}${fields.length ? ` (${fields.join(', ')})` : ''}`;
+          });
+        const detail = [
+          missingTenants.length ? `Missing: ${missingTenants.join(', ')}` : '',
+          changed.length ? `Different from ${referenceTenant}: ${changed.join('; ')}` : '',
+          presentTenants.length === 1 ? `Only in ${presentTenants[0]}` : '',
+        ].filter(Boolean).join('. ');
+        rows.push({ aspect: aspectName, key, status: statusValue, presentTenants, missingTenants, values, detail });
       }
     };
 
-    compareGroups('rules', groupedBy(left.rules, (rule) => rule.id), groupedBy(right.rules, (rule) => rule.id), (items) => groupFingerprint(items, (rule) => rule.rawXml), (a, b) => `Changed: ${ruleChangedFields(a, b).join(', ') || 'content'}`, (items) => { const rule = items[0]; return rule ? `L${rule.level} · ${rule.status} · ${rule.useCaseId}` : 'Missing'; });
-    compareGroups('decoders', groupedBy(left.decoders, (decoder) => decoder.name), groupedBy(right.decoders, (decoder) => decoder.name), (items) => groupFingerprint(items, (decoder) => decoder.rawXml), (a, b) => `Changed: ${decoderChangedFields(a, b).join(', ') || 'content'}`, (items) => { const decoder = items[0]; return decoder ? `${decoder.parent || 'no parent'} · ${decoder.orderFields.length} fields · ${decoder.regex.length} regex` : 'Missing'; });
-    compareGroups('files', groupedBy(left.files, (file) => relativeSourcePath(file.name)), groupedBy(right.files, (file) => relativeSourcePath(file.name)), (items) => groupFingerprint(items, (file) => `${file.type}:${file.hash}`), () => 'File content or type changed', (items) => { const file = items[0]; return file ? `${file.type} · ${(file.size / 1024).toFixed(1)} KB` : 'Missing'; });
+    compareGroups(
+      'rules',
+      new Map(snapshots.map((snapshot) => [snapshot.tenant, groupedBy(snapshot.rules, (rule) => rule.id)])),
+      (items) => groupFingerprint(items, (rule) => rule.rawXml),
+      ruleChangedFields,
+      (items) => {
+        const rule = items[0];
+        return rule ? `L${rule.level} / ${rule.status} / ${rule.useCaseId}` : 'Missing';
+      },
+    );
+    compareGroups(
+      'decoders',
+      new Map(snapshots.map((snapshot) => [snapshot.tenant, groupedBy(snapshot.decoders, (decoder) => decoder.name)])),
+      (items) => groupFingerprint(items, (decoder) => decoder.rawXml),
+      decoderChangedFields,
+      (items) => {
+        const decoder = items[0];
+        return decoder ? `${decoder.parent || 'no parent'} / ${decoder.orderFields.length} fields / ${decoder.regex.length} regex` : 'Missing';
+      },
+    );
+    compareGroups(
+      'files',
+      new Map(snapshots.map((snapshot) => [snapshot.tenant, groupedBy(snapshot.files, (file) => relativeSourcePath(file.name))])),
+      (items) => groupFingerprint(items, (file) => `${file.type}:${file.hash}`),
+      () => ['content or type'],
+      (items) => {
+        const file = items[0];
+        return file ? `${file.type} / ${(file.size / 1024).toFixed(1)} KB` : 'Missing';
+      },
+    );
 
-    const compareSets = (aspectName: ComparisonAspect, leftValues: Set<string>, rightValues: Set<string>) => {
-      const keys = new Set([...leftValues, ...rightValues]);
+    const compareSets = (aspectName: ComparisonAspect, valuesByTenant: Map<string, Set<string>>) => {
+      const keys = new Set<string>();
+      valuesByTenant.forEach((values) => values.forEach((key) => keys.add(key)));
       for (const key of keys) {
-        if (!rightValues.has(key)) rows.push({ aspect: aspectName, key, status: 'only_left', leftValue: 'Present', rightValue: 'Missing', detail: `Only in ${leftTenant}` });
-        else if (!leftValues.has(key)) rows.push({ aspect: aspectName, key, status: 'only_right', leftValue: 'Missing', rightValue: 'Present', detail: `Only in ${rightTenant}` });
+        const presentTenants = selectedTenants.filter((tenant) => valuesByTenant.get(tenant)?.has(key));
+        if (presentTenants.length === selectedTenants.length) continue;
+        const missingTenants = selectedTenants.filter((tenant) => !presentTenants.includes(tenant));
+        rows.push({
+          aspect: aspectName,
+          key,
+          status: presentTenants.length === 1 ? 'unique' : 'missing_clients',
+          presentTenants,
+          missingTenants,
+          values: Object.fromEntries(selectedTenants.map((tenant) => [tenant, valuesByTenant.get(tenant)?.has(key) ? 'Present' : 'Missing'])),
+          detail: presentTenants.length === 1 ? `Only in ${presentTenants[0]}` : `Missing: ${missingTenants.join(', ')}`,
+        });
       }
     };
-    compareSets('use_cases', left.useCases, right.useCases);
-    compareSets('mitre', left.mitre, right.mitre);
-    compareSets('fields', left.fields, right.fields);
+    compareSets('use_cases', new Map(snapshots.map((snapshot) => [snapshot.tenant, snapshot.useCases])));
+    compareSets('mitre', new Map(snapshots.map((snapshot) => [snapshot.tenant, snapshot.mitre])));
+    compareSets('fields', new Map(snapshots.map((snapshot) => [snapshot.tenant, snapshot.fields])));
 
     const issueKey = (issue: ValidationIssue) => `${issue.type}:${issue.ruleId || issue.decoderName || issue.fileName || issue.title}`;
-    compareGroups('validation', groupedBy(left.issues, issueKey), groupedBy(right.issues, issueKey), (items) => groupFingerprint(items, (issue) => `${issue.severity}:${issue.detail}`), () => 'Severity or finding detail changed', (items) => items[0]?.severity || 'Missing');
+    compareGroups(
+      'validation',
+      new Map(snapshots.map((snapshot) => [snapshot.tenant, groupedBy(snapshot.issues, issueKey)])),
+      (items) => groupFingerprint(items, (issue) => `${issue.severity}:${issue.detail}`),
+      () => ['severity or detail'],
+      (items) => items[0]?.severity || 'Missing',
+    );
 
     rows.sort((a, b) => a.aspect.localeCompare(b.aspect) || a.key.localeCompare(b.key));
-    return { left, right, rows };
-  }, [data, leftTenant, rightTenant, useCaseCatalog]);
+    return { snapshots, rows };
+  }, [baselineTenant, data, selectedTenants, useCaseCatalog]);
 
   const filteredRows = useMemo(() => {
     const normalized = deferredQuery.trim().toLowerCase();
     return comparison.rows.filter((row) => {
       if (aspect !== 'all' && row.aspect !== aspect) return false;
       if (status !== 'all' && row.status !== status) return false;
-      return !normalized || `${comparisonAspectLabel[row.aspect]} ${row.key} ${row.detail}`.toLowerCase().includes(normalized);
+      const searchable = `${comparisonAspectLabel[row.aspect]} ${row.key} ${row.detail} ${row.presentTenants.join(' ')} ${row.missingTenants.join(' ')}`;
+      return !normalized || searchable.toLowerCase().includes(normalized);
     });
   }, [aspect, comparison.rows, deferredQuery, status]);
   const paged = usePagedRows(filteredRows);
@@ -887,8 +958,8 @@ function ClientComparison({ data, tenants, useCaseCatalog }: { data: ParsedColle
     comparison.rows.forEach((row) => { counts[row.aspect] += 1; });
     return {
       counts,
-      ruleUnion: new Set([...comparison.left.rules.map((rule) => rule.id), ...comparison.right.rules.map((rule) => rule.id)]).size,
-      decoderUnion: new Set([...comparison.left.decoders.map((decoder) => decoder.name), ...comparison.right.decoders.map((decoder) => decoder.name)]).size,
+      ruleUnion: new Set(comparison.snapshots.flatMap((snapshot) => snapshot.rules.map((rule) => rule.id))).size,
+      decoderUnion: new Set(comparison.snapshots.flatMap((snapshot) => snapshot.decoders.map((decoder) => decoder.name))).size,
     };
   }, [comparison]);
   const countFor = (aspectName: ComparisonAspect) => comparisonSummary.counts[aspectName];
@@ -898,7 +969,7 @@ function ClientComparison({ data, tenants, useCaseCatalog }: { data: ParsedColle
     return <SurfaceCard className="p-8"><SectionHeader eyebrow="Client comparison" title="Two clients required" description="Load manager archives for at least two clients to compare their rulesets." /></SurfaceCard>;
   }
 
-  const tenantSummary = (snapshot: typeof comparison.left) => [
+  const tenantSummary = (snapshot: (typeof comparison.snapshots)[number]) => [
     ['Rules', snapshot.rules.length],
     ['Decoders', snapshot.decoders.length],
     ['Use cases', snapshot.useCases.size],
@@ -910,60 +981,99 @@ function ClientComparison({ data, tenants, useCaseCatalog }: { data: ParsedColle
   return (
     <div className="space-y-4">
       <SurfaceCard className="client-compare-hero p-5 md:p-6">
-        <SectionHeader eyebrow="Cross-client visibility" title="Client comparison" description="Compare rulesets, content drift, detection coverage, source files, and validation findings." />
-        <div className="client-compare-selectors">
-          <label><span>First client</span><Select value={leftTenant} onChange={(event) => setLeftTenant(event.target.value)}>{tenants.map((tenant) => <option key={tenant} value={tenant} disabled={tenant === rightTenant}>{tenant}</option>)}</Select></label>
-          <GitCompareArrows aria-hidden="true" />
-          <label><span>Second client</span><Select value={rightTenant} onChange={(event) => setRightTenant(event.target.value)}>{tenants.map((tenant) => <option key={tenant} value={tenant} disabled={tenant === leftTenant}>{tenant}</option>)}</Select></label>
+        <SectionHeader eyebrow="Comparison" title="Client comparison" description="Select any clients, then compare rules, decoders, coverage, files, and findings across the full selection." />
+        <div className="client-compare-scope">
+          <div className="client-compare-scope-heading">
+            <div><strong>Clients</strong><span>{selectedTenants.length} of {tenants.length} selected</span></div>
+            <div><Button className="h-8 border-transparent bg-transparent px-2 text-xs shadow-none" onClick={() => setSelectedTenants(tenants)}>Select all</Button><Button className="h-8 border-transparent bg-transparent px-2 text-xs shadow-none" onClick={() => setSelectedTenants([])}>Clear</Button></div>
+          </div>
+          <div className="client-compare-client-list">
+            {tenants.map((tenant) => {
+              const checked = selectedTenants.includes(tenant);
+              return (
+                <label key={tenant} className="client-compare-client-option">
+                  <Checkbox
+                    checked={checked}
+                    onCheckedChange={(next) => setSelectedTenants((current) => next
+                      ? [...current, tenant].filter((value, index, all) => all.indexOf(value) === index)
+                      : current.filter((value) => value !== tenant))}
+                  />
+                  <span>{tenant}</span>
+                </label>
+              );
+            })}
+          </div>
+          <label className="client-compare-baseline">
+            <span>Baseline for changed fields</span>
+            <Select value={baselineTenant} disabled={!selectedTenants.length} onChange={(event) => setBaselineTenant(event.target.value)}>
+              {selectedTenants.map((tenant) => <option key={tenant} value={tenant}>{tenant}</option>)}
+            </Select>
+          </label>
         </div>
-        <div className="client-snapshot-grid">
-          {[comparison.left, comparison.right].map((snapshot) => (
-            <div key={snapshot.tenant} className="client-snapshot">
-              <strong>{snapshot.tenant}</strong>
-              <div>{tenantSummary(snapshot).map(([label, value]) => <span key={label}><small>{label}</small><b>{fmt(value)}</b></span>)}</div>
+
+        {selectedTenants.length >= 2 ? (
+          <div className="client-snapshot-grid">
+            {comparison.snapshots.map((snapshot) => (
+              <div key={snapshot.tenant} className="client-snapshot">
+                <strong>{snapshot.tenant}{snapshot.tenant === baselineTenant ? <Badge tone="muted">Baseline</Badge> : null}</strong>
+                <div>{tenantSummary(snapshot).map(([label, value]) => <span key={label}><small>{label}</small><b>{fmt(value)}</b></span>)}</div>
+              </div>
+            ))}
+          </div>
+        ) : <SubtleCard className="client-compare-empty">Select at least two clients to compare.</SubtleCard>}
+      </SurfaceCard>
+
+      {selectedTenants.length >= 2 && (
+        <>
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-7">
+            <KPI label="Rule differences" value={countFor('rules')} sub={`${driftFor('rules', comparisonSummary.ruleUnion)}% drift`} tone={countFor('rules') ? 'amber' : 'green'} />
+            <KPI label="Decoder differences" value={countFor('decoders')} sub={`${driftFor('decoders', comparisonSummary.decoderUnion)}% drift`} tone={countFor('decoders') ? 'amber' : 'green'} />
+            <KPI label="Use case differences" value={countFor('use_cases')} sub="coverage delta" tone={countFor('use_cases') ? 'amber' : 'green'} />
+            <KPI label="MITRE differences" value={countFor('mitre')} sub="technique delta" tone={countFor('mitre') ? 'amber' : 'green'} />
+            <KPI label="Field differences" value={countFor('fields')} sub="schema delta" tone={countFor('fields') ? 'amber' : 'green'} />
+            <KPI label="File differences" value={countFor('files')} sub="source delta" tone={countFor('files') ? 'amber' : 'green'} />
+            <KPI label="Validation differences" value={countFor('validation')} sub="finding delta" tone={countFor('validation') ? 'amber' : 'green'} />
+          </div>
+
+          <SurfaceCard className="space-y-4 p-4 md:p-5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div><h2 className="text-lg font-bold text-[var(--text)]">Exact differences</h2><p className="text-sm text-[var(--text-soft)]">Every missing or changed item across selected clients.</p></div>
+              <Badge tone={comparison.rows.length ? 'warning' : 'success'}>{fmt(comparison.rows.length)} differences</Badge>
             </div>
-          ))}
-        </div>
-      </SurfaceCard>
-
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-7">
-        <KPI label="Rule differences" value={countFor('rules')} sub={`${driftFor('rules', comparisonSummary.ruleUnion)}% drift`} tone={countFor('rules') ? 'amber' : 'green'} />
-        <KPI label="Decoder differences" value={countFor('decoders')} sub={`${driftFor('decoders', comparisonSummary.decoderUnion)}% drift`} tone={countFor('decoders') ? 'amber' : 'green'} />
-        <KPI label="Use case differences" value={countFor('use_cases')} sub="coverage delta" tone={countFor('use_cases') ? 'amber' : 'green'} />
-        <KPI label="MITRE differences" value={countFor('mitre')} sub="technique delta" tone={countFor('mitre') ? 'amber' : 'green'} />
-        <KPI label="Field differences" value={countFor('fields')} sub="schema delta" tone={countFor('fields') ? 'amber' : 'green'} />
-        <KPI label="File differences" value={countFor('files')} sub="source delta" tone={countFor('files') ? 'amber' : 'green'} />
-        <KPI label="Validation differences" value={countFor('validation')} sub="finding delta" tone={countFor('validation') ? 'amber' : 'green'} />
-      </div>
-
-      <SurfaceCard className="space-y-4 p-4 md:p-5">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div><h2 className="text-lg font-bold text-[var(--text)]">Exact differences</h2><p className="text-sm text-[var(--text-soft)]">Every missing or changed item between selected clients.</p></div>
-          <Badge tone={comparison.rows.length ? 'warning' : 'success'}>{fmt(comparison.rows.length)} differences</Badge>
-        </div>
-        <SubtleCard className="!flex !flex-row !flex-nowrap items-center gap-2 overflow-x-auto p-3">
-          <Input className="h-9 w-[260px] min-w-[260px]" placeholder="Search ID, name, field, file..." value={query} onChange={(event) => setQuery(event.target.value)} />
-          <Select className="h-9 min-w-[150px]" value={aspect} onChange={(event) => setAspect(event.target.value as typeof aspect)}><option value="all">All aspects</option>{(Object.keys(comparisonAspectLabel) as ComparisonAspect[]).map((value) => <option key={value} value={value}>{comparisonAspectLabel[value]}</option>)}</Select>
-          <Select className="h-9 min-w-[150px]" value={status} onChange={(event) => setStatus(event.target.value as typeof status)}><option value="all">All differences</option><option value="only_left">Only {leftTenant}</option><option value="changed">Changed</option><option value="only_right">Only {rightTenant}</option></Select>
-        </SubtleCard>
-        <PageControls total={filteredRows.length} page={paged.page} totalPages={paged.totalPages} start={paged.start} end={paged.end} setPage={paged.setPage} />
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead><tr className="text-left"><th className="p-2">Aspect</th><th className="p-2">Item</th><th className="p-2">Difference</th><th className="p-2">{leftTenant}</th><th className="p-2">{rightTenant}</th><th className="p-2">Details</th></tr></thead>
-            <tbody>{paged.pageRows.map((row) => (
-              <tr key={`${row.aspect}:${row.key}:${row.status}`} className="border-b border-[var(--border)]">
-                <td className="p-2"><Badge tone="muted">{comparisonAspectLabel[row.aspect]}</Badge></td>
-                <td className="max-w-[280px] p-2 font-mono text-xs font-semibold text-[var(--text)]"><span className="block truncate" title={row.key}>{row.key}</span></td>
-                <td className="p-2"><span className={cx('whitespace-nowrap rounded-md px-2 py-1 text-xs font-semibold', row.status === 'changed' ? statusPillClass('warning') : row.status === 'only_left' ? statusPillClass('info') : statusPillClass('danger'))}>{row.status === 'changed' ? 'Changed' : row.status === 'only_left' ? `Only ${leftTenant}` : `Only ${rightTenant}`}</span></td>
-                <td className="p-2 text-xs text-[var(--text-soft)]">{row.leftValue}</td>
-                <td className="p-2 text-xs text-[var(--text-soft)]">{row.rightValue}</td>
-                <td className="min-w-[220px] p-2 text-xs text-[var(--text-soft)]">{row.detail}</td>
-              </tr>
-            ))}</tbody>
-          </table>
-        </div>
-        <PageControls total={filteredRows.length} page={paged.page} totalPages={paged.totalPages} start={paged.start} end={paged.end} setPage={paged.setPage} />
-      </SurfaceCard>
+            <SubtleCard className="!flex !flex-row !flex-nowrap items-center gap-2 overflow-x-auto p-3">
+              <Input className="h-9 w-[260px] min-w-[260px]" placeholder="Search ID, name, field, file, client..." value={query} onChange={(event) => setQuery(event.target.value)} />
+              <Select className="h-9 min-w-[150px]" value={aspect} onChange={(event) => setAspect(event.target.value as typeof aspect)}>
+                <option value="all">All aspects</option>
+                {(Object.keys(comparisonAspectLabel) as ComparisonAspect[]).map((value) => <option key={value} value={value}>{comparisonAspectLabel[value]}</option>)}
+              </Select>
+              <Select className="h-9 min-w-[180px]" value={status} onChange={(event) => setStatus(event.target.value as typeof status)}>
+                <option value="all">All differences</option>
+                <option value="unique">Unique to one client</option>
+                <option value="missing_clients">Missing from clients</option>
+                <option value="changed">Changed across clients</option>
+              </Select>
+            </SubtleCard>
+            <PageControls total={filteredRows.length} page={paged.page} totalPages={paged.totalPages} start={paged.start} end={paged.end} setPage={paged.setPage} />
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead><tr className="text-left"><th className="p-2">Aspect</th><th className="p-2">Item</th><th className="p-2">Difference</th><th className="p-2">Coverage</th><th className="p-2">Present in</th><th className="p-2">Missing from</th><th className="p-2">Details</th></tr></thead>
+                <tbody>{paged.pageRows.map((row) => (
+                  <tr key={`${row.aspect}:${row.key}:${row.status}`} className="border-b border-[var(--border)]">
+                    <td className="p-2"><Badge tone="muted">{comparisonAspectLabel[row.aspect]}</Badge></td>
+                    <td className="max-w-[280px] p-2 font-mono text-xs font-semibold text-[var(--text)]"><span className="block truncate" title={row.key}>{row.key}</span></td>
+                    <td className="p-2"><span className={cx('whitespace-nowrap rounded-md px-2 py-1 text-xs font-semibold', row.status === 'changed' ? statusPillClass('warning') : row.status === 'unique' ? statusPillClass('info') : statusPillClass('danger'))}>{row.status === 'changed' ? 'Changed' : row.status === 'unique' ? 'Unique' : 'Missing'}</span></td>
+                    <td className="p-2 text-xs font-semibold text-[var(--text)]">{row.presentTenants.length}/{selectedTenants.length}</td>
+                    <td className="min-w-[180px] p-2 text-xs text-[var(--text-soft)]" title={row.presentTenants.map((tenant) => `${tenant}: ${row.values[tenant]}`).join('\n')}>{row.presentTenants.join(', ')}</td>
+                    <td className="min-w-[180px] p-2 text-xs text-[var(--text-soft)]">{row.missingTenants.join(', ') || 'None'}</td>
+                    <td className="min-w-[220px] p-2 text-xs text-[var(--text-soft)]">{row.detail}</td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+            <PageControls total={filteredRows.length} page={paged.page} totalPages={paged.totalPages} start={paged.start} end={paged.end} setPage={paged.setPage} />
+          </SurfaceCard>
+        </>
+      )}
     </div>
   );
 }
