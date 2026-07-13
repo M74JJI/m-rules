@@ -2021,20 +2021,20 @@ body {
 .signin-brand {
   display: flex;
   align-items: center;
-  gap: 0.8rem;
+  gap: 1rem;
 }
 
 .signin-brand-mark {
   display: inline-flex;
-  width: 44px;
-  height: 44px;
+  width: 64px;
+  height: 64px;
   align-items: center;
   justify-content: center;
 }
 
 .signin-brand-mark img {
-  width: 42px;
-  height: 42px;
+  width: 62px;
+  height: 62px;
   object-fit: contain;
 }
 
@@ -2044,13 +2044,13 @@ body {
 }
 
 .signin-brand strong {
-  font-size: 1rem;
+  font-size: 1.2rem;
   letter-spacing: -0.02em;
 }
 
 .signin-brand small {
   color: rgba(255, 255, 255, 0.58);
-  font-size: 0.62rem;
+  font-size: 0.7rem;
   font-weight: 700;
   letter-spacing: 0.14em;
   text-transform: uppercase;
