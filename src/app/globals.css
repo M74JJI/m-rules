@@ -1619,7 +1619,7 @@ body {
 
 .workspace-source-panel {
   border: 1px solid color-mix(in oklch, white 12%, transparent);
-  background: linear-gradient(145deg, oklch(0.29 0.1 274), oklch(0.2 0.08 274));
+  background: linear-gradient(145deg, oklch(0.29 0.1 274), oklch(0.2 0.08 274)) !important;
   border-radius: 22px;
   color: white;
   box-shadow: 0 18px 38px rgba(29, 34, 81, 0.2);
@@ -1631,10 +1631,17 @@ body {
   color: rgba(255, 255, 255, 0.82) !important;
 }
 
-.workspace-source-panel select {
+.workspace-source-panel [data-slot="native-select"] {
   border-color: rgba(255, 255, 255, 0.18) !important;
   background: rgba(255, 255, 255, 0.08) !important;
   color: white !important;
+  -webkit-text-fill-color: white !important;
+  color-scheme: dark;
+  opacity: 1 !important;
+}
+
+.workspace-source-panel [data-slot="native-select-icon"] {
+  color: rgba(255, 255, 255, 0.78) !important;
 }
 
 .workspace-source-panel option {

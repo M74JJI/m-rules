@@ -1,20 +1,27 @@
 'use client';
 
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import { createElement, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
+  AlertTriangle,
+  Award,
   Boxes,
   Braces,
   ChartNoAxesCombined,
+  CheckCircle2,
   CircleGauge,
   ClipboardCheck,
   CodeXml,
   Database,
   FileCode2,
   FileSearch,
+  FileStack,
+  Gauge,
   GitBranch,
   Library,
+  Link2,
   ListTree,
+  Network,
   PanelLeftClose,
   PanelLeftOpen,
   Radar,
@@ -23,7 +30,11 @@ import {
   Sparkles,
   TableProperties,
   Tags,
+  Target,
+  TestTube2,
+  TrendingUp,
   UploadCloud,
+  Workflow,
   type LucideIcon,
 } from 'lucide-react';
 import { Badge, Button, FieldLabel, Input, SectionHeader, Select, SubtleCard, SurfaceCard, Textarea } from '@/components/ui/primitives';
@@ -279,8 +290,44 @@ const downloadText = (fileName: string, content: string, type = 'text/plain') =>
 };
 
 // ---- KPI Card ----
+const kpiIconFor = (label: string): LucideIcon => {
+  const value = label.toLowerCase();
+  if (value === 'id') return CodeXml;
+  if (value === 'role') return Boxes;
+  if (value === 'produced') return Database;
+  if (value === 'used') return Search;
+  if (value.includes('source section')) return FileCode2;
+  if (value.includes('commented rule')) return CodeXml;
+  if (value.includes('group flow')) return Workflow;
+  if (value.includes('patch suggestion')) return Sparkles;
+  if (value.includes('decoder')) return Braces;
+  if (value.includes('use case')) return ListTree;
+  if (value.includes('mitre')) return Radar;
+  if (value.includes('field')) return TableProperties;
+  if (value.includes('template')) return Library;
+  if (value.includes('file')) return FileStack;
+  if (value.includes('node')) return CircleGauge;
+  if (value.includes('edge')) return Network;
+  if (value.includes('link') || value.includes('depend')) return Link2;
+  if (value.includes('coverage') || value.includes('covered')) return Target;
+  if (value.includes('test')) return TestTube2;
+  if (value.includes('jira')) return Boxes;
+  if (value.includes('selected') || value.includes('alias')) return Tags;
+  if (value.includes('matching')) return Search;
+  if (value.includes('excellent')) return Award;
+  if (value.includes('good') || value.includes('strong')) return CheckCircle2;
+  if (value.includes('score') || value.includes('average')) return Gauge;
+  if (value.includes('critical') || value.includes('issue') || value.includes('warning') || value.includes('weak') || value.includes('poor') || value.includes('gap') || value.includes('missing') || value.includes('broken') || value.includes('review')) return AlertTriangle;
+  if (value.includes('risk')) return Activity;
+  if (value.includes('external')) return FileSearch;
+  if (value.includes('rule')) return ShieldCheck;
+  if (value.includes('production')) return TrendingUp;
+  if (value.includes('roundtrip')) return Workflow;
+  return ChartNoAxesCombined;
+};
+
 function KPI({ label, value, sub, tone }: { label: string; value: number | string; sub: string; tone?: string }) {
-  const Icon = tone === 'red' ? ClipboardCheck : tone === 'amber' ? Activity : tone === 'green' ? ShieldCheck : ChartNoAxesCombined;
+  const icon = createElement(kpiIconFor(label));
   const toneClass =
     tone === 'red'
       ? 'border-red-500/25 bg-red-500/10'
@@ -291,7 +338,7 @@ function KPI({ label, value, sub, tone }: { label: string; value: number | strin
           : 'border-sky-500/20 bg-sky-500/10';
   return (
     <SubtleCard className={cx('dashboard-kpi p-4', toneClass)} data-tone={tone || 'cyan'}>
-      <span className="dashboard-kpi-icon"><Icon /></span>
+      <span className="dashboard-kpi-icon">{icon}</span>
       <div className="dashboard-kpi-copy">
         <div className="dashboard-kpi-value">{typeof value === 'number' ? fmt(value) : value}</div>
         <div className="dashboard-kpi-label">{label}</div>
