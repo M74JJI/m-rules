@@ -18,6 +18,7 @@ import {
   FileStack,
   Gauge,
   GitBranch,
+  GitCompareArrows,
   Library,
   Link2,
   ListTree,
@@ -53,7 +54,7 @@ import { buildAiAnalysis, type AiAnalysisResult } from './lib/ai-rule-intelligen
 import { searchParsedCollection } from './lib/search-query';
 import { analyzeXmlRoundtrip, buildRoundtripMarkdownReport } from './lib/xml-roundtrip';
 
-type ActiveView = 'upload' | 'command' | 'templates' | 'composer' | 'useCaseStudio' | 'coverage' | 'quality' | 'usecases' | 'rules' | 'decoders' | 'fields' | 'graph' | 'mitre' | 'validation' | 'files' | 'search' | 'ai' | 'roundtrip' | 'fieldIntel';
+type ActiveView = 'upload' | 'command' | 'compare' | 'templates' | 'composer' | 'useCaseStudio' | 'coverage' | 'quality' | 'usecases' | 'rules' | 'decoders' | 'fields' | 'graph' | 'mitre' | 'validation' | 'files' | 'search' | 'ai' | 'roundtrip' | 'fieldIntel';
 type Selected = { type: 'rule'; item: RuleRecord } | { type: 'decoder'; item: DecoderRecord } | { type: 'issue'; item: ValidationIssue } | null;
 type CurrentUser = { id?: string; name?: string | null; email?: string | null };
 type ManagerArchiveStatus = {
@@ -260,6 +261,7 @@ function restoreGraphCollection(): ParsedCollection {
 const NAV_VIEWS: { id: ActiveView; label: string; desc: string; group: string; icon: LucideIcon }[] = [
   { id: 'command', label: 'Overview', desc: 'Summary and operational status', group: 'Workspace', icon: CircleGauge },
   { id: 'upload', label: 'Data source', desc: 'Refresh manager archives', group: 'Workspace', icon: Database },
+  { id: 'compare', label: 'Client comparison', desc: 'Compare rulesets and coverage', group: 'Workspace', icon: GitCompareArrows },
   { id: 'rules', label: 'Rules', desc: 'Explore and search detection rules', group: 'Detection', icon: ShieldCheck },
   { id: 'decoders', label: 'Decoders', desc: 'Inspect decoder hierarchy', group: 'Detection', icon: Braces },
   { id: 'usecases', label: 'Use cases', desc: 'Browse detection coverage tree', group: 'Detection', icon: ListTree },
@@ -710,6 +712,258 @@ function CommandCenter({ data }: { data: ParsedCollection }) {
           )}
         </SurfaceCard>
       </div>
+    </div>
+  );
+}
+
+type ComparisonAspect = 'rules' | 'decoders' | 'use_cases' | 'mitre' | 'fields' | 'files' | 'validation';
+type ComparisonStatus = 'only_left' | 'changed' | 'only_right';
+type ComparisonRow = {
+  aspect: ComparisonAspect;
+  key: string;
+  status: ComparisonStatus;
+  leftValue: string;
+  rightValue: string;
+  detail: string;
+};
+
+const comparisonAspectLabel: Record<ComparisonAspect, string> = {
+  rules: 'Rules',
+  decoders: 'Decoders',
+  use_cases: 'Use cases',
+  mitre: 'MITRE',
+  fields: 'Fields',
+  files: 'Files',
+  validation: 'Validation',
+};
+
+const normalizeList = (values: string[]) => [...values].sort((a, b) => a.localeCompare(b));
+const relativeSourcePath = (name: string) => name.split('/').slice(1).join('/') || name;
+
+function groupedBy<T>(items: T[], keyFor: (item: T) => string) {
+  const groups = new Map<string, T[]>();
+  for (const item of items) {
+    const key = keyFor(item);
+    groups.set(key, [...(groups.get(key) || []), item]);
+  }
+  return groups;
+}
+
+function groupFingerprint<T>(items: T[], valueFor: (item: T) => string) {
+  return stableTextHash(items.map(valueFor).sort().join('\n--record--\n'));
+}
+
+function ruleChangedFields(left: RuleRecord[], right: RuleRecord[]) {
+  const fields: string[] = [];
+  const a = left[0];
+  const b = right[0];
+  if (left.length !== right.length) fields.push('occurrences');
+  if (!a || !b) return fields;
+  const comparisons: [string, unknown, unknown][] = [
+    ['level', a.level, b.level],
+    ['description', a.description, b.description],
+    ['status', a.status, b.status],
+    ['role', a.role, b.role],
+    ['severity', a.severity, b.severity],
+    ['use case', a.useCaseId, b.useCaseId],
+    ['MITRE', normalizeList(a.mitre), normalizeList(b.mitre)],
+    ['groups', normalizeList(a.groups), normalizeList(b.groups)],
+    ['dependencies', normalizeList(a.dependencies.map((item) => `${item.type}:${item.value}`)), normalizeList(b.dependencies.map((item) => `${item.type}:${item.value}`))],
+    ['fields', normalizeList(a.fields.map((item) => `${item.name}:${item.type || ''}:${item.value}`)), normalizeList(b.fields.map((item) => `${item.name}:${item.type || ''}:${item.value}`))],
+    ['options', normalizeList(a.options), normalizeList(b.options)],
+  ];
+  for (const [label, leftValue, rightValue] of comparisons) {
+    if (JSON.stringify(leftValue) !== JSON.stringify(rightValue)) fields.push(label);
+  }
+  if (groupFingerprint(left, (rule) => rule.rawXml) !== groupFingerprint(right, (rule) => rule.rawXml)) fields.push('XML');
+  return [...new Set(fields)];
+}
+
+function decoderChangedFields(left: DecoderRecord[], right: DecoderRecord[]) {
+  const fields: string[] = [];
+  const a = left[0];
+  const b = right[0];
+  if (left.length !== right.length) fields.push('occurrences');
+  if (!a || !b) return fields;
+  if (a.parent !== b.parent) fields.push('parent');
+  if (JSON.stringify(normalizeList(a.prematch || [])) !== JSON.stringify(normalizeList(b.prematch || []))) fields.push('prematch');
+  if (JSON.stringify(normalizeList(a.regex)) !== JSON.stringify(normalizeList(b.regex))) fields.push('regex');
+  if (JSON.stringify(normalizeList(a.orderFields)) !== JSON.stringify(normalizeList(b.orderFields))) fields.push('order fields');
+  if (groupFingerprint(left, (decoder) => decoder.rawXml) !== groupFingerprint(right, (decoder) => decoder.rawXml)) fields.push('XML');
+  return fields;
+}
+
+function ClientComparison({ data, tenants, useCaseCatalog }: { data: ParsedCollection; tenants: string[]; useCaseCatalog: UseCaseRecord[] }) {
+  const [leftTenant, setLeftTenant] = useState(tenants[0] || '');
+  const [rightTenant, setRightTenant] = useState(tenants[1] || tenants[0] || '');
+  const [aspect, setAspect] = useState<'all' | ComparisonAspect>('all');
+  const [status, setStatus] = useState<'all' | ComparisonStatus>('all');
+  const [query, setQuery] = useState('');
+  const deferredQuery = useDeferredValue(query);
+
+  useEffect(() => {
+    if (!tenants.length) return;
+    if (!tenants.includes(leftTenant)) setLeftTenant(tenants[0]);
+    if (!tenants.includes(rightTenant) || rightTenant === leftTenant) {
+      setRightTenant(tenants.find((tenant) => tenant !== leftTenant) || tenants[0]);
+    }
+  }, [leftTenant, rightTenant, tenants]);
+
+  const comparison = useMemo(() => {
+    const snapshotFor = (tenant: string) => {
+      const matches = (item: { tenant?: string; sourceFile?: string; name?: string; fileName?: string }) => getRecordTenant(item) === tenant;
+      const files = data.files.filter(matches);
+      const rules = data.rules.filter(matches);
+      const decoders = data.decoders.filter(matches);
+      const issues = buildScopedIssues(files, rules, decoders, useCaseCatalog);
+      return {
+        tenant,
+        files,
+        rules,
+        decoders,
+        issues,
+        useCases: new Set(rules.map((rule) => rule.useCaseId).filter((id) => id && id !== 'unassigned')),
+        mitre: new Set(rules.flatMap((rule) => rule.mitre)),
+        fields: new Set([...rules.flatMap((rule) => rule.fields.map((field) => field.name)), ...decoders.flatMap((decoder) => decoder.orderFields)]),
+      };
+    };
+
+    const left = snapshotFor(leftTenant);
+    const right = snapshotFor(rightTenant);
+    const rows: ComparisonRow[] = [];
+
+    const compareGroups = <T,>(
+      aspectName: ComparisonAspect,
+      leftGroups: Map<string, T[]>,
+      rightGroups: Map<string, T[]>,
+      fingerprint: (items: T[]) => string,
+      changedDetail: (leftItems: T[], rightItems: T[]) => string,
+      valueFor: (items: T[]) => string = (items) => `${items.length} present`,
+    ) => {
+      const keys = new Set([...leftGroups.keys(), ...rightGroups.keys()]);
+      for (const key of keys) {
+        const leftItems = leftGroups.get(key) || [];
+        const rightItems = rightGroups.get(key) || [];
+        if (!rightItems.length) rows.push({ aspect: aspectName, key, status: 'only_left', leftValue: valueFor(leftItems), rightValue: 'Missing', detail: `Only in ${leftTenant}` });
+        else if (!leftItems.length) rows.push({ aspect: aspectName, key, status: 'only_right', leftValue: 'Missing', rightValue: valueFor(rightItems), detail: `Only in ${rightTenant}` });
+        else if (fingerprint(leftItems) !== fingerprint(rightItems)) rows.push({ aspect: aspectName, key, status: 'changed', leftValue: valueFor(leftItems), rightValue: valueFor(rightItems), detail: changedDetail(leftItems, rightItems) });
+      }
+    };
+
+    compareGroups('rules', groupedBy(left.rules, (rule) => rule.id), groupedBy(right.rules, (rule) => rule.id), (items) => groupFingerprint(items, (rule) => rule.rawXml), (a, b) => `Changed: ${ruleChangedFields(a, b).join(', ') || 'content'}`, (items) => { const rule = items[0]; return rule ? `L${rule.level} · ${rule.status} · ${rule.useCaseId}` : 'Missing'; });
+    compareGroups('decoders', groupedBy(left.decoders, (decoder) => decoder.name), groupedBy(right.decoders, (decoder) => decoder.name), (items) => groupFingerprint(items, (decoder) => decoder.rawXml), (a, b) => `Changed: ${decoderChangedFields(a, b).join(', ') || 'content'}`, (items) => { const decoder = items[0]; return decoder ? `${decoder.parent || 'no parent'} · ${decoder.orderFields.length} fields · ${decoder.regex.length} regex` : 'Missing'; });
+    compareGroups('files', groupedBy(left.files, (file) => relativeSourcePath(file.name)), groupedBy(right.files, (file) => relativeSourcePath(file.name)), (items) => groupFingerprint(items, (file) => `${file.type}:${file.hash}`), () => 'File content or type changed', (items) => { const file = items[0]; return file ? `${file.type} · ${(file.size / 1024).toFixed(1)} KB` : 'Missing'; });
+
+    const compareSets = (aspectName: ComparisonAspect, leftValues: Set<string>, rightValues: Set<string>) => {
+      const keys = new Set([...leftValues, ...rightValues]);
+      for (const key of keys) {
+        if (!rightValues.has(key)) rows.push({ aspect: aspectName, key, status: 'only_left', leftValue: 'Present', rightValue: 'Missing', detail: `Only in ${leftTenant}` });
+        else if (!leftValues.has(key)) rows.push({ aspect: aspectName, key, status: 'only_right', leftValue: 'Missing', rightValue: 'Present', detail: `Only in ${rightTenant}` });
+      }
+    };
+    compareSets('use_cases', left.useCases, right.useCases);
+    compareSets('mitre', left.mitre, right.mitre);
+    compareSets('fields', left.fields, right.fields);
+
+    const issueKey = (issue: ValidationIssue) => `${issue.type}:${issue.ruleId || issue.decoderName || issue.fileName || issue.title}`;
+    compareGroups('validation', groupedBy(left.issues, issueKey), groupedBy(right.issues, issueKey), (items) => groupFingerprint(items, (issue) => `${issue.severity}:${issue.detail}`), () => 'Severity or finding detail changed', (items) => items[0]?.severity || 'Missing');
+
+    rows.sort((a, b) => a.aspect.localeCompare(b.aspect) || a.key.localeCompare(b.key));
+    return { left, right, rows };
+  }, [data, leftTenant, rightTenant, useCaseCatalog]);
+
+  const filteredRows = useMemo(() => {
+    const normalized = deferredQuery.trim().toLowerCase();
+    return comparison.rows.filter((row) => {
+      if (aspect !== 'all' && row.aspect !== aspect) return false;
+      if (status !== 'all' && row.status !== status) return false;
+      return !normalized || `${comparisonAspectLabel[row.aspect]} ${row.key} ${row.detail}`.toLowerCase().includes(normalized);
+    });
+  }, [aspect, comparison.rows, deferredQuery, status]);
+  const paged = usePagedRows(filteredRows);
+
+  const comparisonSummary = useMemo(() => {
+    const counts: Record<ComparisonAspect, number> = { rules: 0, decoders: 0, use_cases: 0, mitre: 0, fields: 0, files: 0, validation: 0 };
+    comparison.rows.forEach((row) => { counts[row.aspect] += 1; });
+    return {
+      counts,
+      ruleUnion: new Set([...comparison.left.rules.map((rule) => rule.id), ...comparison.right.rules.map((rule) => rule.id)]).size,
+      decoderUnion: new Set([...comparison.left.decoders.map((decoder) => decoder.name), ...comparison.right.decoders.map((decoder) => decoder.name)]).size,
+    };
+  }, [comparison]);
+  const countFor = (aspectName: ComparisonAspect) => comparisonSummary.counts[aspectName];
+  const driftFor = (aspectName: ComparisonAspect, unionSize: number) => unionSize ? Math.round((countFor(aspectName) / unionSize) * 100) : 0;
+
+  if (tenants.length < 2) {
+    return <SurfaceCard className="p-8"><SectionHeader eyebrow="Client comparison" title="Two clients required" description="Load manager archives for at least two clients to compare their rulesets." /></SurfaceCard>;
+  }
+
+  const tenantSummary = (snapshot: typeof comparison.left) => [
+    ['Rules', snapshot.rules.length],
+    ['Decoders', snapshot.decoders.length],
+    ['Use cases', snapshot.useCases.size],
+    ['MITRE', snapshot.mitre.size],
+    ['Fields', snapshot.fields.size],
+    ['Issues', snapshot.issues.length],
+  ] as const;
+
+  return (
+    <div className="space-y-4">
+      <SurfaceCard className="client-compare-hero p-5 md:p-6">
+        <SectionHeader eyebrow="Cross-client visibility" title="Client comparison" description="Compare rulesets, content drift, detection coverage, source files, and validation findings." />
+        <div className="client-compare-selectors">
+          <label><span>First client</span><Select value={leftTenant} onChange={(event) => setLeftTenant(event.target.value)}>{tenants.map((tenant) => <option key={tenant} value={tenant} disabled={tenant === rightTenant}>{tenant}</option>)}</Select></label>
+          <GitCompareArrows aria-hidden="true" />
+          <label><span>Second client</span><Select value={rightTenant} onChange={(event) => setRightTenant(event.target.value)}>{tenants.map((tenant) => <option key={tenant} value={tenant} disabled={tenant === leftTenant}>{tenant}</option>)}</Select></label>
+        </div>
+        <div className="client-snapshot-grid">
+          {[comparison.left, comparison.right].map((snapshot) => (
+            <div key={snapshot.tenant} className="client-snapshot">
+              <strong>{snapshot.tenant}</strong>
+              <div>{tenantSummary(snapshot).map(([label, value]) => <span key={label}><small>{label}</small><b>{fmt(value)}</b></span>)}</div>
+            </div>
+          ))}
+        </div>
+      </SurfaceCard>
+
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-7">
+        <KPI label="Rule differences" value={countFor('rules')} sub={`${driftFor('rules', comparisonSummary.ruleUnion)}% drift`} tone={countFor('rules') ? 'amber' : 'green'} />
+        <KPI label="Decoder differences" value={countFor('decoders')} sub={`${driftFor('decoders', comparisonSummary.decoderUnion)}% drift`} tone={countFor('decoders') ? 'amber' : 'green'} />
+        <KPI label="Use case differences" value={countFor('use_cases')} sub="coverage delta" tone={countFor('use_cases') ? 'amber' : 'green'} />
+        <KPI label="MITRE differences" value={countFor('mitre')} sub="technique delta" tone={countFor('mitre') ? 'amber' : 'green'} />
+        <KPI label="Field differences" value={countFor('fields')} sub="schema delta" tone={countFor('fields') ? 'amber' : 'green'} />
+        <KPI label="File differences" value={countFor('files')} sub="source delta" tone={countFor('files') ? 'amber' : 'green'} />
+        <KPI label="Validation differences" value={countFor('validation')} sub="finding delta" tone={countFor('validation') ? 'amber' : 'green'} />
+      </div>
+
+      <SurfaceCard className="space-y-4 p-4 md:p-5">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div><h2 className="text-lg font-bold text-[var(--text)]">Exact differences</h2><p className="text-sm text-[var(--text-soft)]">Every missing or changed item between selected clients.</p></div>
+          <Badge tone={comparison.rows.length ? 'warning' : 'success'}>{fmt(comparison.rows.length)} differences</Badge>
+        </div>
+        <SubtleCard className="!flex !flex-row !flex-nowrap items-center gap-2 overflow-x-auto p-3">
+          <Input className="h-9 w-[260px] min-w-[260px]" placeholder="Search ID, name, field, file..." value={query} onChange={(event) => setQuery(event.target.value)} />
+          <Select className="h-9 min-w-[150px]" value={aspect} onChange={(event) => setAspect(event.target.value as typeof aspect)}><option value="all">All aspects</option>{(Object.keys(comparisonAspectLabel) as ComparisonAspect[]).map((value) => <option key={value} value={value}>{comparisonAspectLabel[value]}</option>)}</Select>
+          <Select className="h-9 min-w-[150px]" value={status} onChange={(event) => setStatus(event.target.value as typeof status)}><option value="all">All differences</option><option value="only_left">Only {leftTenant}</option><option value="changed">Changed</option><option value="only_right">Only {rightTenant}</option></Select>
+        </SubtleCard>
+        <PageControls total={filteredRows.length} page={paged.page} totalPages={paged.totalPages} start={paged.start} end={paged.end} setPage={paged.setPage} />
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead><tr className="text-left"><th className="p-2">Aspect</th><th className="p-2">Item</th><th className="p-2">Difference</th><th className="p-2">{leftTenant}</th><th className="p-2">{rightTenant}</th><th className="p-2">Details</th></tr></thead>
+            <tbody>{paged.pageRows.map((row) => (
+              <tr key={`${row.aspect}:${row.key}:${row.status}`} className="border-b border-[var(--border)]">
+                <td className="p-2"><Badge tone="muted">{comparisonAspectLabel[row.aspect]}</Badge></td>
+                <td className="max-w-[280px] p-2 font-mono text-xs font-semibold text-[var(--text)]"><span className="block truncate" title={row.key}>{row.key}</span></td>
+                <td className="p-2"><span className={cx('whitespace-nowrap rounded-md px-2 py-1 text-xs font-semibold', row.status === 'changed' ? statusPillClass('warning') : row.status === 'only_left' ? statusPillClass('info') : statusPillClass('danger'))}>{row.status === 'changed' ? 'Changed' : row.status === 'only_left' ? `Only ${leftTenant}` : `Only ${rightTenant}`}</span></td>
+                <td className="p-2 text-xs text-[var(--text-soft)]">{row.leftValue}</td>
+                <td className="p-2 text-xs text-[var(--text-soft)]">{row.rightValue}</td>
+                <td className="min-w-[220px] p-2 text-xs text-[var(--text-soft)]">{row.detail}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+        <PageControls total={filteredRows.length} page={paged.page} totalPages={paged.totalPages} start={paged.start} end={paged.end} setPage={paged.setPage} />
+      </SurfaceCard>
     </div>
   );
 }
@@ -2489,7 +2743,7 @@ export default function WazuhRulesHub({ currentUser, initialCustomUseCases = [] 
               </div>
             </div>
             <div className="app-view-actions">
-              {hasData ? (
+              {hasData && view !== 'compare' ? (
                 <Select className="h-9 min-w-[190px] text-xs font-semibold" value={selectedTenant} onChange={(event) => setSelectedTenant(event.target.value)} aria-label="Client scope">
                   <option value={ALL_TENANTS}>All clients (deduped)</option>
                   {tenants.map((tenant) => <option key={tenant} value={tenant}>{tenantLabel(tenant)}</option>)}
@@ -2507,6 +2761,7 @@ export default function WazuhRulesHub({ currentUser, initialCustomUseCases = [] 
           )}
           {view === 'useCaseStudio' && <UseCaseStudio useCases={useCaseCatalog} currentUser={currentUser} onCreate={handleCreateUseCase} onDelete={handleDeleteUseCase} />}
           {view === 'command' && hasData && <CommandCenter data={displayData} />}
+          {view === 'compare' && hasData && <ClientComparison data={data} tenants={tenants} useCaseCatalog={useCaseCatalog} />}
           {view === 'rules' && hasData && <RuleExplorer data={displayData} onSelect={setSelected} />}
           {view === 'decoders' && hasData && <DecoderExplorer data={displayData} onSelect={setSelected} />}
           {view === 'fields' && hasData && <FieldCoverageMatrix data={displayData} onSelect={setSelected} />}

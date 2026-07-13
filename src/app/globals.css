@@ -1815,6 +1815,101 @@ body {
   background: var(--primary);
 }
 
+.client-compare-hero {
+  background:
+    radial-gradient(circle at 92% 8%, color-mix(in oklch, var(--primary) 10%, transparent), transparent 28%),
+    var(--panel) !important;
+}
+
+.client-compare-selectors {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: end;
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+
+.client-compare-selectors label {
+  display: grid;
+  min-width: 0;
+  gap: 0.45rem;
+}
+
+.client-compare-selectors label > span {
+  color: var(--text-soft);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.client-compare-selectors [data-slot="native-select-wrapper"] {
+  width: 100%;
+}
+
+.client-compare-selectors select {
+  height: 44px !important;
+  font-weight: 650;
+}
+
+.client-compare-selectors > svg {
+  width: 20px;
+  height: 44px;
+  color: var(--primary);
+}
+
+.client-snapshot-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 1.25rem;
+}
+
+.client-snapshot {
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: color-mix(in oklch, var(--panel-2) 88%, transparent);
+  padding: 1rem;
+}
+
+.client-snapshot > strong {
+  display: block;
+  color: var(--text);
+  font-size: 0.84rem;
+  font-weight: 750;
+  text-transform: capitalize;
+}
+
+.client-snapshot > div {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0.6rem;
+  margin-top: 0.85rem;
+}
+
+.client-snapshot span {
+  display: grid;
+  gap: 0.2rem;
+  border-left: 2px solid color-mix(in oklch, var(--primary) 35%, var(--border));
+  padding-left: 0.55rem;
+}
+
+.client-snapshot small {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 0.58rem;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.client-snapshot b {
+  color: var(--text);
+  font-size: 0.92rem;
+  font-variant-numeric: tabular-nums;
+}
+
 .app-theme-unify [data-slot="card"] {
   border-radius: 20px;
   box-shadow: var(--shadow);
@@ -1953,6 +2048,22 @@ body {
 
   .app-view-content {
     padding: 0 1rem 1rem;
+  }
+
+  .client-compare-selectors {
+    grid-template-columns: 1fr;
+  }
+
+  .client-compare-selectors > svg {
+    display: none;
+  }
+
+  .client-snapshot-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .client-snapshot > div {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
