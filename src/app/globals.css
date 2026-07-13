@@ -2097,8 +2097,7 @@ body {
   margin-bottom: 2rem;
 }
 
-.signin-capabilities > div,
-.signin-trust-note {
+.signin-capabilities > div {
   display: flex;
   align-items: center;
   gap: 0.8rem;
@@ -2111,8 +2110,7 @@ body {
   color: oklch(0.78 0.13 274);
 }
 
-.signin-capabilities span,
-.signin-trust-note span {
+.signin-capabilities span {
   display: grid;
   gap: 0.12rem;
 }
@@ -2196,31 +2194,6 @@ body {
   width: 17px;
   height: 17px;
   margin-left: auto;
-}
-
-.signin-trust-note {
-  margin-top: 1.5rem;
-  border-top: 1px solid var(--border);
-  padding-top: 1.25rem;
-}
-
-.signin-trust-note > svg {
-  width: 20px;
-  height: 20px;
-  flex: 0 0 20px;
-  color: var(--success);
-}
-
-.signin-trust-note strong {
-  color: var(--text);
-  font-size: 0.72rem;
-  font-weight: 650;
-}
-
-.signin-trust-note small {
-  color: var(--text-muted);
-  font-size: 0.65rem;
-  line-height: 1.45;
 }
 
 .signin-legal {
